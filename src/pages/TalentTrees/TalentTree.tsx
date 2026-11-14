@@ -1,0 +1,2231 @@
+import { useEffect, useState } from 'react'
+import type { FormEvent } from 'react'
+import {
+  AlertCircle,
+  BookOpen,
+  Eye,
+  Minus,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+  Trash2,
+  Sparkles,
+  X,
+} from 'lucide-react'
+
+import type { Tree } from '../../types/tree'
+import { supabase } from '../../lib/supabase'
+import { trees } from '../../data/trees'
+
+type Talent = {
+  id: string
+  tree_key: string
+  name: string
+  icon_url: string | null
+  description: string | null
+  max_level: number
+  is_hidden: boolean
+  is_supreme: boolean
+  current_points: number
+}
+
+type PrerequisiteTalent = {
+  id: string
+  name: string
+  tree_key: string
+  is_hidden: boolean
+}
+
+type TalentPrerequisite = {
+  talent_id: string
+  required_points: number
+  prerequisite: PrerequisiteTalent | null
+}
+
+type TalentTreeRequirement = {
+  talent_id: string
+  required_tree_key: string
+  required_points: number
+}
+
+type TalentWithPrerequisites = Talent & {
+  prerequisites: TalentPrerequisite[]
+  treeRequirements: TalentTreeRequirement[]
+}
+
+type TalentForm = {
+  tree_key: string
+  name: string
+  icon_url: string
+  description: string
+  max_level: number
+  is_hidden: boolean
+  prerequisites: Array<{
+    prerequisite_talent_id: string
+    required_points: number
+  }>
+  treeRequirements: Array<{
+    required_tree_key: string
+    required_points: number
+  }>
+}
+
+type DependentTalent = {
+  id: string
+  name: string
+  points: number
+}
+
+type TalentProgress = {
+  talent_id: string
+  points: number
+}
+
+type TalentTreeProps = {
+  tree: Tree
+  isAdmin: boolean
+  totalAvailable: number
+  totalDistributed: number
+  onProgressChanged: (
+    treeId: string,
+    previousPoints: number,
+    updatedPoints: number,
+  ) => void
+  onTalentDeleted: (
+    treeId: string,
+    removedPoints: number,
+    wasActive: boolean,
+  ) => void
+}
+
+const regularTrees = trees.filter((t) => t.id !== 'supremo')
+
+const emptyForm: TalentForm = {
+  tree_key: 'vitalidade',
+  name: '',
+  icon_url: '',
+  description: '',
+  max_level: 1,
+  is_hidden: false,
+  prerequisites: [],
+  treeRequirements: [],
+}
+
+const pointButtonStyle = {
+  width: '31px',
+  height: '31px',
+  display: 'grid',
+  placeItems: 'center',
+  border: '1px solid #e4dfd4',
+  borderRadius: '6px',
+  background: '#fbfaf7',
+  color: '#64788a',
+  cursor: 'pointer',
+} as const
+
+const errorAlertStyle = {
+  display: 'flex',
+  alignItems: 'flex-start',
+  gap: '9px',
+  margin: '12px 0',
+  padding: '11px 14px',
+  border: '1px solid #e7b7b3',
+  borderRadius: '7px',
+  background: '#fbe9e7',
+  color: '#a13f39',
+  fontSize: '11px',
+  lineHeight: 1.55,
+} as const
+
+const dangerButtonStyle = {
+  minHeight: '38px',
+  padding: '0 15px',
+  border: '1px solid #a9544d',
+  borderRadius: '6px',
+  background: '#a9544d',
+  color: '#fff',
+  cursor: 'pointer',
+  font: 'inherit',
+  fontSize: '11px',
+} as const
+
+const requirementBadgeStyle = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '5px',
+  width: 'fit-content',
+  marginTop: '6px',
+  padding: '4px 7px',
+  border: '1px solid #e6dcc8',
+  borderRadius: '4px',
+  background: '#f5f0e6',
+  color: '#8b7652',
+  fontSize: '8px',
+  fontWeight: 700,
+  letterSpacing: '.55px',
+  lineHeight: 1,
+} as const
+
+function treeName(treeKey: string) {
+  if (treeKey === 'supremo') return 'Talento Supremo'
+
+  return trees.find((t) => t.id === treeKey)?.name ?? treeKey
+}
+
+export default function TalentTree({
+  tree,
+  isAdmin,
+  totalAvailable,
+  onProgressChanged,
+  onTalentDeleted,
+}: TalentTreeProps) {
+  const Icon = tree.icon
+
+  const [talents, setTalents] = useState<TalentWithPrerequisites[]>([])
+  const [treeDistributed, setTreeDistributed] = useState(0)
+  const [selectedTalent, setSelectedTalent] =
+    useState<TalentWithPrerequisites | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
+  const [updatingTalentId, setUpdatingTalentId] = useState<string | null>(null)
+  const [progressMessage, setProgressMessage] = useState<string | null>(null)
+
+  const [modalOpen, setModalOpen] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [form, setForm] = useState<TalentForm>(emptyForm)
+  const [prerequisiteSearch, setPrerequisiteSearch] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const [deletingTalent, setDeletingTalent] = useState<Talent | null>(null)
+  const [dependentTalents, setDependentTalents] = useState<DependentTalent[]>([])
+  const [deletePoints, setDeletePoints] = useState(0)
+  const [deleteLoading, setDeleteLoading] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+
+  const [searchTerm, setSearchTerm] = useState('')
+  const [selectedFilter, setSelectedFilter] = useState<
+    'all' | 'active' | 'inactive' | 'unknown'
+  >('all')
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadTalents() {
+      setLoading(true)
+      setError(null)
+
+      if (!supabase) {
+        setError('A conexão com o banco de dados não está configurada.')
+        setLoading(false)
+        return
+      }
+
+      const { data: talentData, error: talentError } = await supabase
+        .from('talents')
+        .select(
+          'id, tree_key, name, icon_url, description, max_level, is_hidden, is_supreme',
+        )
+        .eq('tree_key', tree.id)
+        .order('created_at', { ascending: true })
+
+      if (cancelled) return
+
+      if (talentError) {
+        console.error('Erro ao carregar talentos:', talentError.message)
+        setError('Não foi possível carregar os talentos desta árvore.')
+        setLoading(false)
+        return
+      }
+
+      const loadedTalents = (talentData ?? []) as Omit<
+        Talent,
+        'current_points'
+      >[]
+
+      if (loadedTalents.length === 0) {
+        setTalents([])
+        setTreeDistributed(0)
+        setLoading(false)
+        return
+      }
+
+      const talentIds = loadedTalents.map((talent) => talent.id)
+
+      const [
+        prerequisiteResult,
+        treeRequirementResult,
+        progressResult,
+      ] = await Promise.all([
+        supabase
+          .from('talent_prerequisites')
+          .select(`
+            talent_id,
+            required_points,
+            prerequisite:talents!talent_prerequisites_prerequisite_talent_id_fkey (
+              id,
+              name,
+              tree_key,
+              is_hidden
+            )
+          `)
+          .in('talent_id', talentIds),
+
+        supabase
+          .from('talent_tree_requirements')
+          .select('talent_id, required_tree_key, required_points')
+          .in('talent_id', talentIds),
+
+        supabase
+          .from('talent_progress')
+          .select('talent_id, points')
+          .in('talent_id', talentIds),
+      ])
+
+      if (cancelled) return
+
+      if (prerequisiteResult.error) {
+        console.error(
+          'Erro ao carregar pré-requisitos:',
+          prerequisiteResult.error.message,
+        )
+        setError(
+          'Os talentos foram encontrados, mas não foi possível carregar seus pré-requisitos.',
+        )
+        setLoading(false)
+        return
+      }
+
+      if (treeRequirementResult.error) {
+        console.error(
+          'Erro ao carregar requisitos por árvore:',
+          treeRequirementResult.error.message,
+        )
+        setError(
+          'Não foi possível carregar os requisitos de pontos por árvore.',
+        )
+        setLoading(false)
+        return
+      }
+
+      if (progressResult.error) {
+        console.error(
+          'Erro ao carregar pontos da árvore:',
+          progressResult.error.message,
+        )
+        setError(
+          'Não foi possível carregar os pontos distribuídos nesta árvore.',
+        )
+        setLoading(false)
+        return
+      }
+
+      const loadedPrerequisites =
+        (prerequisiteResult.data ?? []) as unknown as TalentPrerequisite[]
+
+      const loadedTreeRequirements =
+        (treeRequirementResult.data ?? []) as TalentTreeRequirement[]
+
+      const loadedProgress = (progressResult.data ?? []) as TalentProgress[]
+
+      const progressByTalent = new Map(
+        loadedProgress.map((progress) => [
+          progress.talent_id,
+          Number(progress.points),
+        ]),
+      )
+
+      const talentsWithPrerequisites: TalentWithPrerequisites[] =
+        loadedTalents.map((talent) => ({
+          ...talent,
+          current_points: progressByTalent.get(talent.id) ?? 0,
+          prerequisites: loadedPrerequisites.filter(
+            (prerequisite) => prerequisite.talent_id === talent.id,
+          ),
+          treeRequirements: loadedTreeRequirements.filter(
+            (requirement) => requirement.talent_id === talent.id,
+          ),
+        }))
+
+      const distributedInTree = loadedProgress.reduce(
+        (sum, progress) => sum + Number(progress.points),
+        0,
+      )
+
+      setTalents(talentsWithPrerequisites)
+      setTreeDistributed(distributedInTree)
+      setLoading(false)
+    }
+
+    void loadTalents()
+
+    return () => {
+      cancelled = true
+    }
+  }, [tree.id, reloadKey])
+
+  useEffect(() => {
+    if (!selectedTalent && !modalOpen && !deletingTalent) return
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape' && !saving && !deleteLoading) {
+        setSelectedTalent(null)
+        setModalOpen(false)
+        setDeletingTalent(null)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [selectedTalent, modalOpen, deletingTalent, saving, deleteLoading])
+
+  function openTalent(talent: TalentWithPrerequisites) {
+    setSelectedTalent(talent)
+  }
+
+  async function changeTalentPoints(
+    talent: TalentWithPrerequisites,
+    delta: 1 | -1,
+  ) {
+    if (!supabase || updatingTalentId) return
+
+    if (delta === 1 && totalAvailable <= 0) {
+      setProgressMessage('Não há pontos disponíveis para distribuir.')
+      return
+    }
+
+    if (delta === 1 && talent.current_points >= talent.max_level) return
+    if (delta === -1 && talent.current_points <= 0) return
+
+    setUpdatingTalentId(talent.id)
+    setProgressMessage(null)
+
+    const { data, error } = await supabase.rpc('change_talent_points', {
+      p_talent_id: talent.id,
+      p_delta: delta,
+    })
+
+    if (error) {
+      console.error('Erro ao alterar pontos do talento:', error.message)
+
+      const databaseMessage = error.message || ''
+
+      const friendlyMessage = databaseMessage.includes(
+        'Não é possível remover estes pontos',
+      )
+        ? 'Não é possível remover estes pontos: outro talento ativo depende deles.'
+        : databaseMessage.includes(
+              'Os pré-requisitos deste talento não foram atendidos',
+            )
+          ? 'Os pré-requisitos deste talento não foram atendidos.'
+          : databaseMessage ||
+            'Não foi possível alterar os pontos deste talento.'
+
+      setProgressMessage(friendlyMessage)
+      setUpdatingTalentId(null)
+      return
+    }
+
+    const updatedPoints = Number(data)
+
+    if (!Number.isInteger(updatedPoints) || updatedPoints < 0) {
+      setProgressMessage(
+        'O banco retornou um valor de progressão inválido. Atualize a árvore.',
+      )
+      setUpdatingTalentId(null)
+      setReloadKey((current) => current + 1)
+      return
+    }
+
+    const previousPoints = talent.current_points
+
+    setTalents((current) =>
+      current.map((item) =>
+        item.id === talent.id
+          ? { ...item, current_points: updatedPoints }
+          : item,
+      ),
+    )
+
+    setTreeDistributed(
+      (current) => current + (updatedPoints - previousPoints),
+    )
+
+    setSelectedTalent((current) =>
+      current?.id === talent.id
+        ? { ...current, current_points: updatedPoints }
+        : current,
+    )
+
+    onProgressChanged(tree.id, previousPoints, updatedPoints)
+
+    setUpdatingTalentId(null)
+  }
+
+  const allAvailableTalentsForPrereq = talents.map((t) => ({
+    id: t.id,
+    tree_key: t.tree_key,
+    name: t.name,
+    icon_url: t.icon_url,
+    description: t.description,
+    max_level: t.max_level,
+    is_hidden: t.is_hidden,
+    is_supreme: t.is_supreme,
+  }))
+
+  const availablePrerequisites = talents.filter((talent) => {
+    if (talent.id === editingId) return false
+    const normalizedSearch = prerequisiteSearch
+      .trim()
+      .toLocaleLowerCase('pt-BR')
+    return (
+      !normalizedSearch ||
+      talent.name.toLocaleLowerCase('pt-BR').includes(normalizedSearch)
+    )
+  })
+
+  async function openEdit(talent: TalentWithPrerequisites) {
+    if (!isAdmin || !supabase) return
+
+    setSelectedTalent(null)
+    setError('')
+    setProgressMessage('')
+
+    const [
+      prerequisiteResult,
+      treeRequirementResult,
+    ] = await Promise.all([
+      supabase
+        .from('talent_prerequisites')
+        .select('prerequisite_talent_id, required_points')
+        .eq('talent_id', talent.id),
+
+      supabase
+        .from('talent_tree_requirements')
+        .select('required_tree_key, required_points')
+        .eq('talent_id', talent.id),
+    ])
+
+    if (prerequisiteResult.error || treeRequirementResult.error) {
+      setError(
+        `Não foi possível carregar os requisitos: ${
+          prerequisiteResult.error?.message ??
+          treeRequirementResult.error?.message
+        }`,
+      )
+      return
+    }
+
+    if (talent.max_level < talent.current_points) {
+      setError(
+        `O nível máximo não pode ser menor que os ${talent.current_points} pontos já distribuídos neste talento.`,
+      )
+      return
+    }
+
+    setEditingId(talent.id)
+
+    setForm({
+      tree_key: talent.tree_key,
+      name: talent.name,
+      icon_url: talent.icon_url ?? '',
+      description: talent.description ?? '',
+      max_level: talent.max_level,
+      is_hidden: talent.is_hidden,
+
+      prerequisites: (prerequisiteResult.data ?? []).map((item) => ({
+        prerequisite_talent_id: item.prerequisite_talent_id,
+        required_points: item.required_points,
+      })),
+
+      treeRequirements: (treeRequirementResult.data ?? []).map(
+        (item) => ({
+          required_tree_key: item.required_tree_key,
+          required_points: item.required_points,
+        }),
+      ),
+    })
+
+    setPrerequisiteSearch('')
+    setModalOpen(true)
+  }
+
+  function updateForm<K extends keyof TalentForm>(
+    key: K,
+    value: TalentForm[K],
+  ) {
+    setForm((current) => ({
+      ...current,
+      [key]: value,
+    }))
+  }
+
+  function togglePrerequisite(
+    talentId: string,
+    checked: boolean,
+  ) {
+    setForm((current) => ({
+      ...current,
+
+      prerequisites: checked
+        ? [
+            ...current.prerequisites,
+            {
+              prerequisite_talent_id: talentId,
+              required_points: 1,
+            },
+          ]
+        : current.prerequisites.filter(
+            (item) => item.prerequisite_talent_id !== talentId,
+          ),
+    }))
+  }
+
+  function updatePrerequisitePoints(
+    talentId: string,
+    points: number,
+  ) {
+    setForm((current) => ({
+      ...current,
+
+      prerequisites: current.prerequisites.map((item) =>
+        item.prerequisite_talent_id === talentId
+          ? { ...item, required_points: points }
+          : item,
+      ),
+    }))
+  }
+
+  function addTreeRequirement() {
+    const usedTrees = form.treeRequirements.map(
+      (item) => item.required_tree_key,
+    )
+
+    const nextTree = regularTrees.find(
+      (t) => !usedTrees.includes(t.id),
+    )
+
+    if (!nextTree) return
+
+    setForm((current) => ({
+      ...current,
+
+      treeRequirements: [
+        ...current.treeRequirements,
+        {
+          required_tree_key: nextTree.id,
+          required_points: 1,
+        },
+      ],
+    }))
+  }
+
+  function updateTreeRequirement(
+    index: number,
+    key: 'required_tree_key' | 'required_points',
+    value: string | number,
+  ) {
+    setForm((current) => ({
+      ...current,
+
+      treeRequirements: current.treeRequirements.map(
+        (item, itemIndex) =>
+          itemIndex === index
+            ? { ...item, [key]: value }
+            : item,
+      ),
+    }))
+  }
+
+  function removeTreeRequirement(index: number) {
+    setForm((current) => ({
+      ...current,
+
+      treeRequirements: current.treeRequirements.filter(
+        (_, itemIndex) => itemIndex !== index,
+      ),
+    }))
+  }
+
+  async function handleSave(
+    event: FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault()
+
+    if (!supabase || saving || !editingId) return
+
+    const name = form.name.trim()
+    const maxLevel = Number(form.max_level)
+    const iconUrl = form.icon_url.trim()
+
+    const currentTalent = talents.find((t) => t.id === editingId)
+    if (currentTalent && maxLevel < currentTalent.current_points) {
+      setError(
+        `O nível máximo não pode ser menor que os ${currentTalent.current_points} pontos já distribuídos neste talento.`,
+      )
+      return
+    }
+
+    if (!name) {
+      setError('Informe o nome do talento.')
+      return
+    }
+
+    if (!Number.isInteger(maxLevel) || maxLevel < 1) {
+      setError(
+        'O nível máximo deve ser um número inteiro maior que zero.',
+      )
+      return
+    }
+
+    if (iconUrl && !/^https?:\/\/.+/i.test(iconUrl)) {
+      setError('Informe uma URL válida para a imagem do ícone.')
+      return
+    }
+
+    if (
+      form.prerequisites.some(
+        (item) =>
+          !Number.isInteger(item.required_points) ||
+          item.required_points < 1,
+      )
+    ) {
+      setError(
+        'Todos os pré-requisitos devem exigir pelo menos 1 ponto.',
+      )
+      return
+    }
+
+    if (
+      form.treeRequirements.some(
+        (item) =>
+          !Number.isInteger(item.required_points) ||
+          item.required_points < 1,
+      )
+    ) {
+      setError(
+        'Todos os requisitos por árvore devem exigir pelo menos 1 ponto.',
+      )
+      return
+    }
+
+    if (
+      new Set(
+        form.treeRequirements.map(
+          (item) => item.required_tree_key,
+        ),
+      ).size !== form.treeRequirements.length
+    ) {
+      setError('Não é possível adicionar a mesma árvore mais de uma vez.')
+      return
+    }
+
+    setSaving(true)
+    setError('')
+    setProgressMessage('')
+
+    const payload = {
+      tree_key: form.tree_key,
+      name,
+      icon_url: iconUrl,
+      description: form.description.trim(),
+      max_level: maxLevel,
+      is_hidden: form.is_hidden,
+      is_supreme: form.tree_key === 'supremo',
+    }
+
+    const result = await supabase
+      .from('talents')
+      .update(payload)
+      .eq('id', editingId)
+      .select('id')
+      .single()
+
+    if (result.error || !result.data) {
+      setError(
+        `Não foi possível salvar o talento: ${
+          result.error?.message ?? 'registro não retornado'
+        }`,
+      )
+      setSaving(false)
+      return
+    }
+
+    const talentId = result.data.id
+
+    const {
+      error: deletePrerequisitesError,
+    } = await supabase
+      .from('talent_prerequisites')
+      .delete()
+      .eq('talent_id', talentId)
+
+    if (deletePrerequisitesError) {
+      setError(
+        `O talento foi salvo, mas não foi possível substituir os pré-requisitos: ${deletePrerequisitesError.message}`,
+      )
+      setSaving(false)
+      setReloadKey((current) => current + 1)
+      return
+    }
+
+    if (form.prerequisites.length > 0) {
+      const {
+        error: insertPrerequisitesError,
+      } = await supabase
+        .from('talent_prerequisites')
+        .insert(
+          form.prerequisites.map((item) => ({
+            talent_id: talentId,
+            prerequisite_talent_id:
+              item.prerequisite_talent_id,
+            required_points: item.required_points,
+          })),
+        )
+
+      if (insertPrerequisitesError) {
+        setError(
+          `O talento foi salvo, mas houve erro ao registrar os pré-requisitos: ${insertPrerequisitesError.message}`,
+        )
+        setSaving(false)
+        setReloadKey((current) => current + 1)
+        return
+      }
+    }
+
+    const {
+      error: deleteTreeRequirementsError,
+    } = await supabase
+      .from('talent_tree_requirements')
+      .delete()
+      .eq('talent_id', talentId)
+
+    if (deleteTreeRequirementsError) {
+      setError(
+        `O talento e os pré-requisitos foram salvos, mas não foi possível atualizar os requisitos por árvore: ${deleteTreeRequirementsError.message}`,
+      )
+      setSaving(false)
+      setReloadKey((current) => current + 1)
+      return
+    }
+
+    if (form.treeRequirements.length > 0) {
+      const {
+        error: insertTreeRequirementsError,
+      } = await supabase
+        .from('talent_tree_requirements')
+        .insert(
+          form.treeRequirements.map((item) => ({
+            talent_id: talentId,
+            required_tree_key: item.required_tree_key,
+            required_points: item.required_points,
+          })),
+        )
+
+      if (insertTreeRequirementsError) {
+        setError(
+          `O talento foi salvo, mas houve erro ao registrar os requisitos por árvore: ${insertTreeRequirementsError.message}`,
+        )
+        setSaving(false)
+        setReloadKey((current) => current + 1)
+        return
+      }
+    }
+
+    setProgressMessage('Talento atualizado com sucesso.')
+    setModalOpen(false)
+    setSaving(false)
+    setReloadKey((current) => current + 1)
+  }
+
+  async function openDeleteConfirmation(talent: TalentWithPrerequisites) {
+    if (!supabase || !isAdmin) return
+
+    setDeleteError('')
+    setDependentTalents([])
+    setDeletePoints(0)
+    setDeletingTalent(talent)
+    setDeleteLoading(true)
+
+    const [
+      { data: progress, error: progressError },
+      { data: links, error: linksError },
+    ] = await Promise.all([
+      supabase
+        .from('talent_progress')
+        .select('points')
+        .eq('talent_id', talent.id)
+        .maybeSingle(),
+
+      supabase
+        .from('talent_prerequisites')
+        .select('talent_id, required_points')
+        .eq('prerequisite_talent_id', talent.id),
+    ])
+
+    if (progressError || linksError) {
+      setDeleteError(
+        `Não foi possível verificar os vínculos e pontos: ${
+          progressError?.message ?? linksError?.message
+        }`,
+      )
+      setDeleteLoading(false)
+      return
+    }
+
+    setDeletePoints(Number(progress?.points ?? 0))
+
+    const dependentIds = [
+      ...new Set((links ?? []).map((item) => item.talent_id)),
+    ]
+
+    if (dependentIds.length > 0) {
+      const [
+        { data: dependentRows, error: dependentError },
+        { data: progressRows, error: dependentProgressError },
+      ] = await Promise.all([
+        supabase
+          .from('talents')
+          .select('id, name, is_hidden')
+          .in('id', dependentIds),
+
+        supabase
+          .from('talent_progress')
+          .select('talent_id, points')
+          .in('talent_id', dependentIds),
+      ])
+
+      if (dependentError || dependentProgressError) {
+        setDeleteError(
+          `Não foi possível verificar os talentos dependentes: ${
+            dependentError?.message ??
+            dependentProgressError?.message
+          }`,
+        )
+        setDeleteLoading(false)
+        return
+      }
+
+      const pointsById = new Map(
+        (progressRows ?? []).map((row) => [
+          row.talent_id,
+          Number(row.points),
+        ]),
+      )
+
+      setDependentTalents(
+        (dependentRows ?? []).map((row) => ({
+          id: row.id,
+          name: row.is_hidden ? '???' : row.name,
+          points: pointsById.get(row.id) ?? 0,
+        })),
+      )
+    }
+
+    setDeleteLoading(false)
+  }
+
+  async function confirmDeleteTalent() {
+    if (
+      !supabase ||
+      !deletingTalent ||
+      deleteLoading ||
+      deleteError
+    ) {
+      return
+    }
+
+    setDeleteLoading(true)
+    setDeleteError('')
+
+    const target = deletingTalent
+    const removedPoints = target.current_points ?? 0
+    const wasActive = removedPoints > 0
+
+    const { error: deleteErrorResult } = await supabase
+      .from('talents')
+      .delete()
+      .eq('id', target.id)
+
+    if (deleteErrorResult) {
+      setDeleteError(
+        `Não foi possível excluir o talento: ${deleteErrorResult.message}. Verifique se há vínculos no banco que impedem a exclusão.`,
+      )
+      setDeleteLoading(false)
+      return
+    }
+
+    setTalents((current) => current.filter((item) => item.id !== target.id))
+    setTreeDistributed((current) => Math.max(0, current - removedPoints))
+    onTalentDeleted(tree.id, removedPoints, wasActive)
+
+    setDeletingTalent(null)
+    setDependentTalents([])
+    setDeleteLoading(false)
+
+    setProgressMessage(
+      `“${target.is_hidden ? 'Talento oculto' : target.name}” foi excluído.`,
+    )
+
+    setReloadKey((current) => current + 1)
+  }
+
+  const normalizedSearch = searchTerm
+    .trim()
+    .toLocaleLowerCase('pt-BR')
+
+  const filteredTalents = talents.filter((talent) => {
+    const matchesFilter =
+      selectedFilter === 'all' ||
+      (selectedFilter === 'active' &&
+        !talent.is_hidden &&
+        talent.current_points > 0) ||
+      (selectedFilter === 'inactive' &&
+        !talent.is_hidden &&
+        talent.current_points === 0) ||
+      (selectedFilter === 'unknown' && talent.is_hidden)
+
+    const matchesSearch =
+      normalizedSearch.length === 0 ||
+      (!talent.is_hidden &&
+        talent.name.toLocaleLowerCase('pt-BR').includes(normalizedSearch))
+
+    return matchesFilter && matchesSearch
+  })
+
+  return (
+    <>
+      <section className="page-heading tree-page-heading">
+        <div>
+          <div className="eyebrow">
+            <span className="eyebrow-line" />
+            ÁRVORE DE TALENTOS
+          </div>
+
+          <h1>{tree.name}</h1>
+          <p>{tree.subtitle}.</p>
+        </div>
+
+        <div className="tree-page-icon">
+          <Icon size={27} />
+        </div>
+      </section>
+
+      <section className="tree-summary">
+        <div>
+          <span>PONTOS DISPONÍVEIS</span>
+          <strong>{totalAvailable}</strong>
+        </div>
+
+        <div>
+          <span>PONTOS DISTRIBUÍDOS NESTA ÁRVORE</span>
+          <strong>{treeDistributed}</strong>
+        </div>
+
+        <div className="summary-note">
+          3 pontos são concedidos a cada nível.
+        </div>
+      </section>
+
+      {progressMessage && (
+        <div
+          className="talent-progress-alert"
+          role="status"
+          style={errorAlertStyle}
+        >
+          <AlertCircle
+            size={15}
+            style={{ flexShrink: 0, marginTop: '1px' }}
+          />
+          <span>{progressMessage}</span>
+        </div>
+      )}
+
+      {loading && (
+        <section className="tree-feedback">
+          <RefreshCw size={22} className="tree-loading-icon" />
+          <h2>Consultando o conhecimento...</h2>
+          <p>Carregando os talentos desta árvore.</p>
+        </section>
+      )}
+
+      {!loading && error && (
+        <section className="tree-feedback tree-feedback-error">
+          <h2>Não foi possível carregar a árvore.</h2>
+          <p>{error}</p>
+
+          <button
+            type="button"
+            className="tree-retry-button"
+            onClick={() => setReloadKey((current) => current + 1)}
+          >
+            <RefreshCw size={15} />
+            Tentar novamente
+          </button>
+        </section>
+      )}
+
+      {!loading && !error && talents.length === 0 && (
+        <section className="empty-tree">
+          <div className="empty-glyph">
+            <BookOpen size={27} />
+          </div>
+
+          <h2>O conhecimento aguarda.</h2>
+
+          <p>
+            Os talentos desta árvore serão apresentados aqui conforme forem
+            cadastrados no Compendium.
+          </p>
+
+          <span>ESTRUTURA DE TALENTOS EM PREPARAÇÃO</span>
+        </section>
+      )}
+
+      {!loading && !error && talents.length > 0 && (
+        <>
+          <section
+            className="talent-browser-controls"
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '13px',
+              margin: '25px 0 18px',
+            }}
+          >
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                minHeight: '44px',
+                padding: '0 13px',
+                border: '1px solid #e5e5e0',
+                borderRadius: '8px',
+                background: 'rgba(255,255,255,.72)',
+                color: '#8c98a3',
+              }}
+            >
+              <Search size={17} />
+
+              <input
+                type="search"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                placeholder="Pesquisar talento pelo nome..."
+                aria-label="Pesquisar talento pelo nome"
+                style={{
+                  width: '100%',
+                  border: 0,
+                  outline: 0,
+                  background: 'transparent',
+                  color: '#465565',
+                  font: 'inherit',
+                  fontSize: '12px',
+                }}
+              />
+
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm('')}
+                  aria-label="Limpar pesquisa"
+                  style={{
+                    display: 'grid',
+                    placeItems: 'center',
+                    border: 0,
+                    background: 'transparent',
+                    color: '#8c98a3',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <X size={15} />
+                </button>
+              )}
+            </label>
+
+            <div
+              role="group"
+              aria-label="Filtrar talentos"
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              {([
+                { value: 'all', label: 'Todos' },
+                { value: 'active', label: 'Ativo' },
+                { value: 'inactive', label: 'Não ativo' },
+                { value: 'unknown', label: 'Desconhecido' },
+              ] as const).map((filter) => {
+                const isSelected = selectedFilter === filter.value
+
+                return (
+                  <button
+                    key={filter.value}
+                    type="button"
+                    aria-pressed={isSelected}
+                    onClick={() => setSelectedFilter(filter.value)}
+                    style={{
+                      minHeight: '34px',
+                      padding: '7px 13px',
+                      border: `1px solid ${
+                        isSelected ? '#b9a47e' : '#e5e5e0'
+                      }`,
+                      borderRadius: '20px',
+                      background: isSelected
+                        ? '#f2eee5'
+                        : 'rgba(255,255,255,.72)',
+                      color: isSelected ? '#806d4c' : '#7d8993',
+                      cursor: 'pointer',
+                      font: 'inherit',
+                      fontSize: '10px',
+                      letterSpacing: '.2px',
+                      transition: 'all .18s ease',
+                    }}
+                  >
+                    {filter.label}
+                  </button>
+                )
+              })}
+            </div>
+
+            <span
+              style={{
+                color: '#9aa1a6',
+                fontSize: '10px',
+                letterSpacing: '.3px',
+              }}
+            >
+              Exibindo {filteredTalents.length} de {talents.length} talentos
+            </span>
+          </section>
+
+          {filteredTalents.length > 0 ? (
+            <section className="talent-tree-list">
+              {filteredTalents.map((talent) => {
+                const isUpdating = updatingTalentId === talent.id
+                const isAnyTalentUpdating = updatingTalentId !== null
+
+                const hasRequirements =
+                  talent.prerequisites.length > 0 ||
+                  talent.treeRequirements.length > 0
+
+                return (
+                  <article
+                    className="talent-tree-card talent-tree-card-clickable"
+                    key={talent.id}
+                  >
+                    <div className="talent-tree-card-header">
+                      <div className="talent-tree-icon">
+                        {talent.icon_url && !talent.is_hidden ? (
+                          <img
+                            src={talent.icon_url}
+                            alt=""
+                            loading="lazy"
+                          />
+                        ) : (
+                          <Sparkles size={22} />
+                        )}
+                      </div>
+
+                      <div className="talent-tree-title">
+                        <h2>{talent.is_hidden ? '???' : talent.name}</h2>
+
+                        <span>
+                          {talent.is_hidden
+                            ? 'CONHECIMENTO DESCONHECIDO'
+                            : `NÍVEL ${talent.current_points} / ${talent.max_level}`}
+                        </span>
+
+                        {!talent.is_hidden && hasRequirements && (
+                          <span
+                            className="talent-requirement-badge"
+                            style={requirementBadgeStyle}
+                          >
+                            <AlertCircle size={10} />
+                            POSSUI PRÉ-REQUISITOS
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'flex-end',
+                        alignItems: 'center',
+                        gap: '7px',
+                        marginTop: '12px',
+                      }}
+                    >
+                      {!talent.is_hidden && (
+                        <>
+                          <button
+                            type="button"
+                            aria-label={`Remover um ponto de ${talent.name}`}
+                            title="Remover um ponto"
+                            disabled={
+                              isAnyTalentUpdating ||
+                              talent.current_points <= 0
+                            }
+                            onClick={() =>
+                              void changeTalentPoints(talent, -1)
+                            }
+                            style={{
+                              ...pointButtonStyle,
+                              opacity:
+                                isAnyTalentUpdating ||
+                                talent.current_points <= 0
+                                  ? 0.45
+                                  : 1,
+                              cursor:
+                                isAnyTalentUpdating ||
+                                talent.current_points <= 0
+                                  ? 'not-allowed'
+                                  : 'pointer',
+                            }}
+                          >
+                            <Minus size={14} />
+                          </button>
+
+                          <button
+                            type="button"
+                            aria-label={`Adicionar um ponto a ${talent.name}`}
+                            title="Adicionar um ponto"
+                            disabled={
+                              isAnyTalentUpdating ||
+                              totalAvailable <= 0 ||
+                              talent.current_points >= talent.max_level
+                            }
+                            onClick={() =>
+                              void changeTalentPoints(talent, 1)
+                            }
+                            style={{
+                              ...pointButtonStyle,
+                              opacity:
+                                isAnyTalentUpdating ||
+                                totalAvailable <= 0 ||
+                                talent.current_points >= talent.max_level
+                                  ? 0.45
+                                  : 1,
+                              cursor:
+                                isAnyTalentUpdating ||
+                                totalAvailable <= 0 ||
+                                talent.current_points >= talent.max_level
+                                  ? 'not-allowed'
+                                  : 'pointer',
+                            }}
+                          >
+                            {isUpdating ? (
+                              <RefreshCw
+                                size={14}
+                                className="tree-loading-icon"
+                              />
+                            ) : (
+                              <Plus size={14} />
+                            )}
+                          </button>
+                        </>
+                      )}
+
+                      {isAdmin && (
+                        <>
+                          <button
+                            type="button"
+                            aria-label={`Editar ${talent.name}`}
+                            title="Editar talento"
+                            onClick={() => void openEdit(talent)}
+                            style={{
+                              ...pointButtonStyle,
+                              color: '#64788a',
+                            }}
+                          >
+                            <Pencil size={14} />
+                          </button>
+
+                          <button
+                            type="button"
+                            aria-label={`Excluir ${talent.name}`}
+                            title="Excluir talento"
+                            onClick={() =>
+                              void openDeleteConfirmation(talent)
+                            }
+                            style={{
+                              ...pointButtonStyle,
+                              color: '#a34d46',
+                              borderColor: '#e7c9c5',
+                            }}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </>
+                      )}
+
+                      <button
+                        type="button"
+                        aria-label={
+                          talent.is_hidden
+                            ? 'Consultar conhecimento'
+                            : `Ver detalhes de ${talent.name}`
+                        }
+                        title="Ver detalhes"
+                        onClick={() => openTalent(talent)}
+                        style={{
+                          ...pointButtonStyle,
+                          borderColor: '#dcd2bd',
+                          background: '#f5f2eb',
+                          color: '#8a7652',
+                        }}
+                      >
+                        <Eye size={15} />
+                      </button>
+                    </div>
+                  </article>
+                )
+              })}
+            </section>
+          ) : (
+            <section className="tree-feedback">
+              <Search size={22} />
+              <h2>Nenhum talento encontrado.</h2>
+              <p>
+                {selectedFilter === 'unknown' && normalizedSearch
+                  ? 'A pesquisa por nome não se aplica a conhecimentos desconhecidos.'
+                  : 'Nenhum talento corresponde à pesquisa e ao filtro selecionados.'}
+              </p>
+
+              <button
+                type="button"
+                className="tree-retry-button"
+                onClick={() => {
+                  setSearchTerm('')
+                  setSelectedFilter('all')
+                }}
+              >
+                Limpar pesquisa e filtros
+              </button>
+            </section>
+          )}
+        </>
+      )}
+
+      {modalOpen && (
+        <div className="talent-modal-backdrop">
+          <section
+            className="talent-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="talent-modal-title"
+          >
+            <header className="talent-modal-header">
+              <div>
+                <span className="eyebrow">
+                  <span className="eyebrow-line" />
+                  CATÁLOGO DE HABILIDADES
+                </span>
+
+                <h2 id="talent-modal-title">Editar talento</h2>
+              </div>
+
+              <button
+                type="button"
+                className="talent-modal-close"
+                onClick={() => setModalOpen(false)}
+                disabled={saving}
+                aria-label="Fechar"
+              >
+                <X size={18} />
+              </button>
+            </header>
+
+            <form onSubmit={(event) => void handleSave(event)}>
+              <div className="talent-form-grid">
+                <label>
+                  <span>Nome do talento</span>
+
+                  <input
+                    required
+                    maxLength={100}
+                    value={form.name}
+                    onChange={(event) =>
+                      updateForm('name', event.target.value)
+                    }
+                    placeholder="Ex.: Corpo Imortal"
+                  />
+                </label>
+
+                <label>
+                  <span>Árvore</span>
+
+                  <select
+                    value={form.tree_key}
+                    onChange={(event) =>
+                      updateForm('tree_key', event.target.value)
+                    }
+                  >
+                    {regularTrees.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+
+                    <option value="supremo">Talento Supremo</option>
+                  </select>
+                </label>
+
+                <label className="talent-form-full">
+                  <span>URL da imagem do ícone</span>
+
+                  <input
+                    type="url"
+                    value={form.icon_url}
+                    onChange={(event) =>
+                      updateForm('icon_url', event.target.value)
+                    }
+                    placeholder="https://exemplo.com/imagem.png"
+                  />
+
+                  <small className="talent-field-hint">
+                    A imagem será exibida em um espaço padronizado de
+                    34 × 34 pixels.
+                  </small>
+
+                  {form.icon_url.trim() && (
+                    <div className="talent-icon-preview">
+                      <img
+                        src={form.icon_url}
+                        alt="Pré-visualização do ícone"
+                        onError={(event) => {
+                          event.currentTarget.style.display = 'none'
+                        }}
+                        onLoad={(event) => {
+                          event.currentTarget.style.display = 'block'
+                        }}
+                      />
+
+                      <span>Pré-visualização</span>
+                    </div>
+                  )}
+                </label>
+
+                <label>
+                  <span>Nível máximo</span>
+
+                  <input
+                    type="number"
+                    min={1}
+                    max={99}
+                    step={1}
+                    required
+                    value={form.max_level}
+                    onChange={(event) =>
+                      updateForm(
+                        'max_level',
+                        Number(event.target.value),
+                      )
+                    }
+                  />
+                </label>
+
+                <label className="talent-form-full">
+                  <span>Descrição mecânica</span>
+
+                  <textarea
+                    rows={4}
+                    value={form.description}
+                    onChange={(event) =>
+                      updateForm('description', event.target.value)
+                    }
+                    placeholder="Descreva os efeitos e regras desta habilidade..."
+                  />
+                </label>
+              </div>
+
+              <div className="talent-form-flags">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={form.is_hidden}
+                    onChange={(event) =>
+                      updateForm('is_hidden', event.target.checked)
+                    }
+                  />
+                  Talento oculto
+                </label>
+              </div>
+
+              <div className="talent-prerequisite-section">
+                <div>
+                  <h3>Pré-requisitos</h3>
+
+                  <p>
+                    Pesquise e selecione os talentos necessários para
+                    desbloquear esta habilidade.
+                  </p>
+                </div>
+
+                <div className="talent-prerequisite-dropdown">
+                  <div className="talent-prerequisite-menu">
+                    <div className="talent-prerequisite-search">
+                      <Search size={16} />
+
+                      <input
+                        type="search"
+                        value={prerequisiteSearch}
+                        onChange={(event) =>
+                          setPrerequisiteSearch(event.target.value)
+                        }
+                        placeholder="Digite o nome de um talento..."
+                      />
+                    </div>
+
+                    <div className="talent-prerequisite-options">
+                      {availablePrerequisites.map((t) => {
+                        const selected = form.prerequisites.some(
+                          (item) =>
+                            item.prerequisite_talent_id === t.id,
+                        )
+
+                        return (
+                          <label
+                            className={`talent-prerequisite-option ${
+                              selected ? 'selected' : ''
+                            }`}
+                            key={t.id}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={(event) =>
+                                togglePrerequisite(
+                                  t.id,
+                                  event.target.checked,
+                                )
+                              }
+                            />
+
+                            <span>
+                              <strong>
+                                {t.is_hidden ? '???' : t.name}
+                              </strong>
+                              <small>{treeName(t.tree_key)}</small>
+                            </span>
+                          </label>
+                        )
+                      })}
+
+                      {availablePrerequisites.length === 0 && (
+                        <p className="talent-prerequisite-empty">
+                          Nenhum talento encontrado.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {form.prerequisites.length > 0 && (
+                  <div className="talent-prerequisite-selected">
+                    <span className="talent-prerequisite-selected-title">
+                      Talentos selecionados
+                    </span>
+
+                    {form.prerequisites.map((item) => {
+                      const t = allAvailableTalentsForPrereq.find(
+                        (candidate) =>
+                          candidate.id === item.prerequisite_talent_id,
+                      )
+
+                      if (!t) return null
+
+                      return (
+                        <div
+                          className="talent-prerequisite-item"
+                          key={t.id}
+                        >
+                          <div className="talent-prerequisite-name">
+                            <strong>
+                              {t.is_hidden ? '???' : t.name}
+                            </strong>
+
+                            <small>{treeName(t.tree_key)}</small>
+                          </div>
+
+                          <label className="talent-prerequisite-points">
+                            <span>Pontos exigidos</span>
+
+                            <input
+                              type="number"
+                              min={1}
+                              max={t.max_level}
+                              value={item.required_points}
+                              onChange={(event) =>
+                                updatePrerequisitePoints(
+                                  t.id,
+                                  Math.min(
+                                    t.max_level,
+                                    Math.max(
+                                      1,
+                                      Number(event.target.value) || 1,
+                                    ),
+                                  ),
+                                )
+                              }
+                            />
+                          </label>
+
+                          <button
+                            type="button"
+                            className="talent-prerequisite-remove"
+                            onClick={() =>
+                              togglePrerequisite(t.id, false)
+                            }
+                            aria-label="Remover pré-requisito"
+                            title="Remover pré-requisito"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="talent-prerequisite-section">
+                <div>
+                  <h3>Requisitos por árvore</h3>
+
+                  <p>
+                    Defina quantos pontos o personagem precisa ter
+                    acumulado em outras árvores para desbloquear este
+                    talento.
+                  </p>
+                </div>
+
+                {form.treeRequirements.map((item, index) => (
+                  <div
+                    className="talent-prerequisite-item"
+                    key={`${item.required_tree_key}-${index}`}
+                  >
+                    <label className="talent-prerequisite-name">
+                      <strong>Árvore exigida</strong>
+
+                      <select
+                        value={item.required_tree_key}
+                        onChange={(event) =>
+                          updateTreeRequirement(
+                            index,
+                            'required_tree_key',
+                            event.target.value,
+                          )
+                        }
+                      >
+                        {regularTrees
+                          .filter(
+                            (t) =>
+                              !form.treeRequirements.some(
+                                (other, otherIndex) =>
+                                  otherIndex !== index &&
+                                  other.required_tree_key === t.id,
+                              ),
+                          )
+                          .map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.name}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+
+                    <label className="talent-prerequisite-points">
+                      <span>Pontos mínimos</span>
+
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        value={item.required_points}
+                        onChange={(event) =>
+                          updateTreeRequirement(
+                            index,
+                            'required_points',
+                            Math.max(
+                              1,
+                              Number(event.target.value) || 1,
+                            ),
+                          )
+                        }
+                      />
+                    </label>
+
+                    <button
+                      type="button"
+                      className="talent-prerequisite-remove"
+                      onClick={() => removeTreeRequirement(index)}
+                      aria-label="Remover requisito por árvore"
+                      title="Remover requisito"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+
+                <button
+                  type="button"
+                  className="talent-secondary-button"
+                  onClick={addTreeRequirement}
+                  disabled={
+                    form.treeRequirements.length >= regularTrees.length
+                  }
+                >
+                  <Plus size={14} />
+                  Adicionar requisito por árvore
+                </button>
+              </div>
+
+              {error && (
+                <div className="talent-feedback error" role="alert">
+                  {error}
+                </div>
+              )}
+
+              <footer className="talent-modal-footer">
+                <button
+                  type="button"
+                  className="talent-secondary-button"
+                  onClick={() => setModalOpen(false)}
+                  disabled={saving}
+                >
+                  Cancelar
+                </button>
+
+                <button
+                  type="submit"
+                  className="talent-primary-button"
+                  disabled={saving}
+                >
+                  {saving ? 'Salvando...' : 'Salvar alterações'}
+                </button>
+              </footer>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {deletingTalent && (
+        <div className="talent-modal-backdrop">
+          <section
+            className="talent-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="talent-delete-title"
+          >
+            <header className="talent-modal-header">
+              <div>
+                <span className="eyebrow">
+                  <span className="eyebrow-line" />
+                  AÇÃO PERMANENTE
+                </span>
+
+                <h2 id="talent-delete-title">Excluir talento?</h2>
+              </div>
+
+              <button
+                type="button"
+                className="talent-modal-close"
+                disabled={deleteLoading}
+                onClick={() => setDeletingTalent(null)}
+                aria-label="Fechar"
+              >
+                <X size={18} />
+              </button>
+            </header>
+
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '14px',
+              }}
+            >
+              <p
+                style={{
+                  margin: 0,
+                  color: '#596b78',
+                  fontSize: '13px',
+                  lineHeight: 1.6,
+                }}
+              >
+                Você está prestes a excluir{' '}
+                <strong>
+                  {deletingTalent.is_hidden
+                    ? 'este talento oculto'
+                    : deletingTalent.name}
+                </strong>
+                . Esta ação não poderá ser desfeita.
+              </p>
+
+              {deleteLoading ? (
+                <p style={{ color: '#82909a', fontSize: '12px' }}>
+                  Verificando vínculos e pontos distribuídos...
+                </p>
+              ) : (
+                <>
+                  {dependentTalents.length > 0 ? (
+                    <div
+                      style={{
+                        padding: '13px 15px',
+                        border: '1px solid #e7c9c5',
+                        borderRadius: '7px',
+                        background: '#fbf1ef',
+                      }}
+                    >
+                      <strong
+                        style={{
+                          display: 'block',
+                          marginBottom: '8px',
+                          color: '#a04e47',
+                          fontSize: '11px',
+                        }}
+                      >
+                        Atenção: {dependentTalents.length}{' '}
+                        {dependentTalents.length === 1
+                          ? 'talento possui'
+                          : 'talentos possuem'}{' '}
+                        este talento como pré-requisito
+                      </strong>
+
+                      <ul
+                        style={{
+                          margin: 0,
+                          paddingLeft: '18px',
+                          color: '#765e5b',
+                          fontSize: '12px',
+                          lineHeight: 1.8,
+                        }}
+                      >
+                        {dependentTalents.map((dependent) => (
+                          <li key={dependent.id}>
+                            {dependent.name}
+                            {dependent.points > 0
+                              ? ` — ${dependent.points} ${
+                                  dependent.points === 1
+                                    ? 'ponto distribuído'
+                                    : 'pontos distribuídos'
+                                }`
+                              : ' — sem pontos distribuídos'}
+                          </li>
+                        ))}
+                      </ul>
+
+                      <p
+                        style={{
+                          margin: '9px 0 0',
+                          color: '#8b5a55',
+                          fontSize: '10px',
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        A exclusão poderá ser impedida se houver vínculos
+                        que não estejam configurados para exclusão em
+                        cascata.
+                      </p>
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        padding: '11px 13px',
+                        border: '1px solid #e4e5df',
+                        borderRadius: '7px',
+                        background: '#f7f7f3',
+                        color: '#71808a',
+                        fontSize: '11px',
+                      }}
+                    >
+                      Nenhum outro talento utiliza este como
+                      pré-requisito.
+                    </div>
+                  )}
+
+                  <div
+                    style={{
+                      padding: '11px 13px',
+                      border: '1px solid #e7d8bd',
+                      borderRadius: '7px',
+                      background: '#faf6ed',
+                      color: '#806d4c',
+                      fontSize: '11px',
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {deletePoints > 0
+                      ? `${deletePoints} ${
+                          deletePoints === 1
+                            ? 'ponto distribuído será removido'
+                            : 'pontos distribuídos serão removidos'
+                        } da progressão global.`
+                      : 'Este talento não possui pontos distribuídos.'}
+                  </div>
+                </>
+              )}
+
+              {deleteError && (
+                <div role="alert" style={errorAlertStyle}>
+                  <AlertCircle size={15} />
+                  <span>{deleteError}</span>
+                </div>
+              )}
+
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  gap: '9px',
+                  marginTop: '4px',
+                }}
+              >
+                <button
+                  type="button"
+                  className="talent-secondary-button"
+                  disabled={deleteLoading}
+                  onClick={() => setDeletingTalent(null)}
+                >
+                  Cancelar
+                </button>
+
+                <button
+                  type="button"
+                  disabled={deleteLoading || Boolean(deleteError)}
+                  onClick={() => void confirmDeleteTalent()}
+                  style={{
+                    ...dangerButtonStyle,
+                    opacity:
+                      deleteLoading || deleteError ? 0.55 : 1,
+                  }}
+                >
+                  {deleteLoading ? 'Aguarde...' : 'Excluir talento'}
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {selectedTalent && (
+        <div className="talent-modal-backdrop">
+          <section
+            className="talent-modal talent-detail-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="talent-detail-title"
+          >
+            <header className="talent-modal-header">
+              <div>
+                <span className="eyebrow">
+                  <span className="eyebrow-line" />
+                  {selectedTalent.is_hidden
+                    ? 'CONHECIMENTO RESTRITO'
+                    : 'COMPÊNDIO DE TALENTOS'}
+                </span>
+
+                <h2 id="talent-detail-title">
+                  {selectedTalent.is_hidden
+                    ? 'Conhecimento desconhecido'
+                    : selectedTalent.name}
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                className="talent-modal-close"
+                onClick={() => setSelectedTalent(null)}
+                aria-label="Fechar"
+              >
+                <X size={18} />
+              </button>
+            </header>
+
+            {selectedTalent.is_hidden ? (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '14px',
+                  padding: '18px 8px 8px',
+                  color: '#8b795c',
+                  textAlign: 'center',
+                }}
+              >
+                <Sparkles size={27} />
+
+                <p
+                  style={{
+                    margin: 0,
+                    color: '#7c8284',
+                    font: 'italic 15px Playfair Display, Georgia, serif',
+                  }}
+                >
+                  Você não detém desse conhecimento ainda.
+                </p>
+
+                <button
+                  type="button"
+                  style={{
+                    padding: '9px 18px',
+                    border: '1px solid #e1d9c9',
+                    borderRadius: '6px',
+                    background: '#f5f2eb',
+                    color: '#78694f',
+                    cursor: 'pointer',
+                    font: 'inherit',
+                    fontSize: '11px',
+                  }}
+                  onClick={() => setSelectedTalent(null)}
+                >
+                  Aah, ok
+                </button>
+              </div>
+            ) : (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '20px',
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '14px',
+                    padding: '14px',
+                    border: '1px solid #ece9e1',
+                    borderRadius: '8px',
+                    background: '#f7f6f2',
+                  }}
+                >
+                  <div className="talent-tree-icon">
+                    {selectedTalent.icon_url ? (
+                      <img src={selectedTalent.icon_url} alt="" />
+                    ) : (
+                      <Sparkles size={25} />
+                    )}
+                  </div>
+
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '5px',
+                    }}
+                  >
+                    <span
+                      style={{
+                        color: '#a08b68',
+                        fontSize: '8px',
+                        fontWeight: 700,
+                        letterSpacing: '1px',
+                      }}
+                    >
+                      NÍVEL ATUAL
+                    </span>
+
+                    <strong
+                      style={{ color: '#465a70', fontSize: '17px' }}
+                    >
+                      {selectedTalent.current_points} /{' '}
+                      {selectedTalent.max_level}
+                    </strong>
+                  </div>
+                </div>
+
+                <section
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '9px',
+                  }}
+                >
+                  <span
+                    style={{
+                      color: '#a08b68',
+                      fontSize: '8px',
+                      fontWeight: 700,
+                      letterSpacing: '1.2px',
+                    }}
+                  >
+                    DESCRIÇÃO
+                  </span>
+
+                  <p
+                    style={{
+                      margin: 0,
+                      color: '#707e88',
+                      fontSize: '12px',
+                      lineHeight: 1.75,
+                      whiteSpace: 'pre-line',
+                    }}
+                  >
+                    {selectedTalent.description ||
+                      'Nenhuma descrição cadastrada.'}
+                  </p>
+                </section>
+
+                {(selectedTalent.prerequisites.length > 0 ||
+                  selectedTalent.treeRequirements.length > 0) && (
+                  <section
+                    className="talent-tree-prerequisites"
+                    style={{ gap: '12px' }}
+                  >
+                    <span>PRÉ-REQUISITOS</span>
+
+                    <ul>
+                      {selectedTalent.prerequisites.map((prerequisite) => (
+                        <li key={prerequisite.talent_id}>
+                          <span>
+                            {prerequisite.prerequisite?.is_hidden
+                              ? '???'
+                              : prerequisite.prerequisite?.name ??
+                                'Talento desconhecido'}
+                          </span>
+
+                          <strong>
+                            {prerequisite.required_points}{' '}
+                            {prerequisite.required_points === 1
+                              ? 'ponto'
+                              : 'pontos'}
+                          </strong>
+                        </li>
+                      ))}
+
+                      {selectedTalent.treeRequirements.map((requirement) => (
+                        <li key={requirement.required_tree_key}>
+                          <span>
+                            {treeName(requirement.required_tree_key)}
+                          </span>
+
+                          <strong>
+                            {requirement.required_points}{' '}
+                            {requirement.required_points === 1
+                              ? 'ponto na árvore'
+                              : 'pontos na árvore'}
+                          </strong>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+    </>
+  )
+}
