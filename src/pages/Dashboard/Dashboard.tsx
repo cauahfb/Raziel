@@ -3,15 +3,22 @@ import { useEffect, useState } from 'react'
 import {
   Activity,
   ArrowUpRight,
+  Crown,
+  RotateCcw,
   Compass,
   Sparkles,
   X,
 } from 'lucide-react'
 
 import type { Tree } from '../../types/tree'
+import TalentDetailsModal, { type TalentDetails } from '../../components/TalentDetailsModal'
+import { supabase } from '../../lib/supabase'
 
+type ActiveTalent = { id: string; name: string; tree_key: string; points: number; is_supreme: boolean }
 type DashboardProps = {
   trees: Tree[]
+  activeTalentsByTree: Record<string, ActiveTalent[]>
+  activeSupremeTalents: ActiveTalent[]
   totalAvailable: number
   totalDistributed: number
   characterLevel: number
@@ -24,25 +31,92 @@ type DashboardProps = {
 
 export default function Dashboard({
   trees,
+  activeTalentsByTree,
+  activeSupremeTalents,
+  isAdmin,
   totalAvailable,
   totalDistributed,
   characterLevel,
-  isAdmin,
   isUpdatingLevel,
   levelUpdateMessage,
   onChangeCharacterLevel,
   onNavigate,
 }: DashboardProps) {
   const [showWelcome, setShowWelcome] = useState(true)
+  const [selectedTalent, setSelectedTalent] = useState<TalentDetails | null>(null)
+  const [pendingTalentId, setPendingTalentId] = useState<string | null>(null)
+  const [talentDetailsCache, setTalentDetailsCache] = useState<Record<string, TalentDetails>>({})
   const [levelInput, setLevelInput] = useState(String(characterLevel))
 
   useEffect(() => {
     setLevelInput(String(characterLevel))
   }, [characterLevel])
 
-  const awakenedTrees = trees.filter(
-    (tree) => tree.visible > 0,
-  ).length
+  // Pré-carrega os detalhes dos talentos ativos enquanto o Dashboard é exibido.
+  // Assim, abrir um talento usa dados em memória e não dispara novas consultas.
+  useEffect(() => {
+    let cancelled = false
+    const activeTalents = [
+      ...Object.values(activeTalentsByTree).flat(),
+      ...activeSupremeTalents,
+    ]
+    const ids = [...new Set(activeTalents.map((talent) => talent.id))]
+    if (!supabase || ids.length === 0) {
+      setTalentDetailsCache({})
+      return () => { cancelled = true }
+    }
+
+    async function preloadTalentDetails() {
+      const [talentsResult, prerequisitesResult, treeRequirementsResult] = await Promise.all([
+        supabase!.from('talents_safe')
+          .select('id, tree_key, name, icon_url, description, max_level, is_hidden, is_supreme')
+          .in('id', ids),
+        supabase!.from('talent_prerequisites_safe')
+          .select('talent_id, required_points, prerequisite_name, prerequisite_is_hidden')
+          .in('talent_id', ids),
+        supabase!.from('talent_tree_requirements_safe')
+          .select('talent_id, required_tree_key, required_points')
+          .in('talent_id', ids),
+      ])
+
+      if (cancelled || talentsResult.error || prerequisitesResult.error || treeRequirementsResult.error) return
+
+      const activePoints = new Map(activeTalents.map((talent) => [talent.id, talent.points]))
+      const nextCache: Record<string, TalentDetails> = {}
+      for (const talent of talentsResult.data ?? []) {
+        nextCache[talent.id] = {
+          ...talent,
+          current_points: activePoints.get(talent.id) ?? 0,
+          prerequisites: (prerequisitesResult.data ?? []).filter((item) => item.talent_id === talent.id),
+          treeRequirements: (treeRequirementsResult.data ?? [])
+            .filter((item) => item.talent_id === talent.id)
+            .map(({ required_tree_key, required_points }) => ({ required_tree_key, required_points })),
+        } as TalentDetails
+      }
+      setTalentDetailsCache(nextCache)
+      if (pendingTalentId && nextCache[pendingTalentId]) {
+        setSelectedTalent(nextCache[pendingTalentId])
+        setPendingTalentId(null)
+      }
+    }
+
+    void preloadTalentDetails()
+    return () => { cancelled = true }
+  }, [activeTalentsByTree, activeSupremeTalents, pendingTalentId])
+
+  function openTalentDetails(talentId: string) {
+    const cachedTalent = talentDetailsCache[talentId]
+    if (cachedTalent) {
+      setSelectedTalent(cachedTalent)
+      return
+    }
+    // Se o usuário clicar antes do pré-carregamento terminar, abre assim que o cache chegar.
+    setPendingTalentId(talentId)
+  }
+
+  const awakenedTrees = trees.filter((tree) => tree.visible > 0).length
+  const totalActiveTalents = Object.values(activeTalentsByTree).reduce((sum, items) => sum + items.length, 0) + activeSupremeTalents.length
+  const totalSupremePoints = activeSupremeTalents.reduce((sum, talent) => sum + talent.points, 0)
 
   const totalPoints = characterLevel * 3
 
@@ -257,19 +331,19 @@ export default function Dashboard({
 
         <article className="stat-card">
           <div className="stat-top">
-            <span>ÁRVORES DESPERTAS</span>
+            <span>TALENTOS ATIVOS</span>
             <span className="stat-icon teal-icon">
               <Compass size={17} />
             </span>
           </div>
 
           <div className="stat-value">
-            {awakenedTrees}
-            <small> / {trees.length}</small>
+            {totalActiveTalents}
+            <small> talentos</small>
           </div>
 
           <div className="stat-foot">
-            Com ao menos um talento ativo
+            {awakenedTrees} de {trees.length} árvores despertas
           </div>
         </article>
       </section>
@@ -278,65 +352,62 @@ export default function Dashboard({
         <div>
           <div className="eyebrow">PROGRESSÃO</div>
           <h2>Árvores de talentos</h2>
-          <p>
-            O estado atual de cada vertente do seu desenvolvimento.
-          </p>
+          <p>Talentos ativos e pontos distribuídos em cada vertente.</p>
         </div>
-
-        <button
-          className="text-action"
-          onClick={() => onNavigate('vitalidade')}
-        >
-          Explorar árvores
-          <ArrowUpRight size={15} />
-        </button>
       </section>
 
-      <section className="tree-grid">
+      <section className="dashboard-tree-list">
         {trees.map((tree) => {
           const Icon = tree.icon
-
+          const activeTalents = activeTalentsByTree[tree.id] ?? []
           return (
-            <button
-              className={`tree-card ${tree.visible > 0 ? 'tree-awake' : ''}`}
-              key={tree.id}
-              onClick={() => onNavigate(tree.id)}
-            >
-              <div className={`tree-icon ${tree.color}`}>
-                <Icon size={20} strokeWidth={1.7} />
-              </div>
-
-              <div className="tree-card-content">
-                <div className="tree-title-row">
-                  <h3>{tree.name}</h3>
-
-                  {tree.visible > 0 && (
-                    <span className="active-dot" />
-                  )}
+            <article className="dashboard-tree-card" key={tree.id}>
+              <button type="button" className="dashboard-tree-heading" onClick={() => onNavigate(tree.id)}>
+                <span className={`tree-icon ${tree.color}`}><Icon size={20} strokeWidth={1.7} /></span>
+                <span className="dashboard-tree-title"><strong>{tree.name}</strong><small>{tree.subtitle}</small></span>
+                <span className="dashboard-tree-metrics"><strong>{activeTalents.length}</strong><small>{activeTalents.length === 1 ? 'talento ativo' : 'talentos ativos'}</small></span>
+                <span className="dashboard-tree-points"><strong>{tree.points}</strong><small>pontos gastos</small></span>
+                <ArrowUpRight size={16} className="tree-arrow" />
+              </button>
+              {activeTalents.length > 0 ? (
+                <div className="dashboard-active-talents">
+                  {activeTalents.map((talent) => (
+                    <button type="button" key={talent.id} onClick={() => openTalentDetails(talent.id)}>
+                      <span>{talent.name}</span><small>Nível {talent.points}</small>
+                    </button>
+                  ))}
                 </div>
-
-                <p>{tree.subtitle}</p>
-
-                <div className="tree-card-foot">
-                  <span>
-                    {tree.visible}{' '}
-                    {tree.visible === 1
-                      ? 'talento ativo'
-                      : 'talentos ativos'}
-                  </span>
-
-                  <span className="tree-points">
-                    {tree.points}
-                    <small> pts</small>
-                  </span>
-                </div>
-              </div>
-
-              <ArrowUpRight className="tree-arrow" size={16} />
-            </button>
+              ) : (
+                <p className="dashboard-empty-talents">Nenhum talento ativo nesta árvore.</p>
+              )}
+            </article>
           )
         })}
       </section>
+
+      {activeSupremeTalents.length > 0 && (
+        <section className="dashboard-supreme-panel">
+          <div className="dashboard-supreme-heading">
+            <span className="dashboard-supreme-emblem"><Crown size={20} /></span>
+            <div><div className="eyebrow">CONHECIMENTO RESTRITO</div><h2>Potenciais Supremos Despertos</h2><p>Conhecimentos que transcendem os limites conhecidos.</p></div>
+            <span className="dashboard-supreme-count">{activeSupremeTalents.length} ATIVA{activeSupremeTalents.length === 1 ? '' : 'S'} · {totalSupremePoints} PONTOS</span>
+          </div>
+          <div className="dashboard-supreme-talents">
+            {activeSupremeTalents.map((talent) => (
+              <button type="button" key={talent.id} onClick={() => openTalentDetails(talent.id)}>
+                <Crown size={15} /><span>{talent.name}</span><small>Nível {talent.points}</small>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {isAdmin && (
+        <section className="dashboard-admin-reset-shortcut">
+          <div><strong>Administração da progressão</strong><span>Redefina todos os pontos distribuídos globalmente.</span></div>
+          <button type="button" onClick={() => onNavigate('reset')}><RotateCcw size={15} /> Área de reset</button>
+        </section>
+      )}
 
       <section className="quote-card">
         <div className="quote-ornament">✧</div>
@@ -352,6 +423,7 @@ export default function Dashboard({
           — REGISTRO ANÔNIMO
         </div>
       </section>
+      {selectedTalent && <TalentDetailsModal talent={selectedTalent} onClose={() => { setSelectedTalent(null); setPendingTalentId(null) }} />}
     </>
   )
 }

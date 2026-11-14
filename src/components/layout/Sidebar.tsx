@@ -9,6 +9,7 @@ import {
   History,
   LayoutDashboard,
   LockKeyhole,
+  RotateCcw,
   Shield,
 } from 'lucide-react'
 
@@ -19,15 +20,17 @@ type SidebarProps = {
   trees: Tree[]
   isAdmin: boolean
   onNavigate: (page: PageKey) => void
+  supremeAvailableCount: number
 }
 
-const adminPages: PageKey[] = ['talents', 'history', 'backup']
+const adminPages: PageKey[] = ['talents', 'history', 'backup', 'reset']
 
 export default function Sidebar({
   activePage,
   trees,
   isAdmin,
   onNavigate,
+  supremeAvailableCount,
 }: SidebarProps) {
   const [adminExpanded, setAdminExpanded] = useState(false)
 
@@ -113,9 +116,22 @@ export default function Sidebar({
         aria-current={activePage === 'supremas' ? 'page' : undefined}
       >
         <Crown size={17} />
-        <span>Habilidades supremas</span>
-        <LockKeyhole size={13} className="lock-icon" />
+        <span>Habilidades Supremas</span>
+        {supremeAvailableCount > 0 ? (
+          <span className="supreme-nav-count" aria-label={`${supremeAvailableCount} talentos supremos disponíveis`}>
+            {supremeAvailableCount}
+          </span>
+        ) : (
+          <LockKeyhole size={13} className="lock-icon" />
+        )}
       </button>
+
+      {supremeAvailableCount > 0 && (
+        <div className="supreme-potential-alert" role="status" aria-live="polite">
+          <span className="supreme-potential-alert-mark" aria-hidden="true">✧</span>
+          <span>Você tem um potencial supremo não utilizado.</span>
+        </div>
+      )}
 
       {/* Área administrativa */}
       {isAdmin && (
@@ -191,6 +207,11 @@ export default function Sidebar({
               >
                 <Database size={15} />
                 <span>Backup</span>
+              </button>
+
+              <button type="button" className={`admin-link ${activePage === 'reset' ? 'active' : ''}`} onClick={() => navigate('reset')} aria-current={activePage === 'reset' ? 'page' : undefined}>
+                <RotateCcw size={15} />
+                <span>Resetar progressão</span>
               </button>
             </div>
           )}

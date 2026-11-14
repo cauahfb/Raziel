@@ -13,8 +13,11 @@ import TalentTree from './pages/TalentTrees/TalentTree'
 
 import AdminPlaceholder from './pages/admin/AdminPlaceholder'
 import TalentManagement from './pages/admin/TalentManagement'
+import ResetProgress from './pages/admin/ResetProgress'
 
 import type { PageKey, Tree } from './types/tree'
+
+type ActiveTalentSummary = { id: string; name: string; tree_key: string; points: number; is_supreme: boolean }
 
 type TalentTreeProgressRow = {
   tree_key: string
@@ -43,9 +46,14 @@ function App() {
     Record<string, { points: number; visible: number }>
   >({})
 
+  const [activeTalentsByTree, setActiveTalentsByTree] = useState<Record<string, ActiveTalentSummary[]>>({})
+  const [activeSupremeTalents, setActiveSupremeTalents] = useState<ActiveTalentSummary[]>([])
+  const [pendingTalentId, setPendingTalentId] = useState<string | null>(null)
   const [progressReady, setProgressReady] = useState(false)
   const [progressError, setProgressError] = useState<string | null>(null)
   const [progressRefresh, setProgressRefresh] = useState(0)
+  const [supremeAvailableCount, setSupremeAvailableCount] = useState(0)
+  const [supremeRefresh, setSupremeRefresh] = useState(0)
 
   const [isUpdatingLevel, setIsUpdatingLevel] = useState(false)
   const [levelUpdateMessage, setLevelUpdateMessage] = useState<string | null>(
@@ -160,7 +168,7 @@ function App() {
 
       const client = supabase
 
-      const [levelResult, treeProgressResult] = await Promise.all([
+      const [levelResult, treeProgressResult, talentsResult, talentProgressResult] = await Promise.all([
         client
           .from('compendium_progress')
           .select('character_level')
@@ -172,6 +180,8 @@ function App() {
           .select(
             'tree_key, total_points, talents_with_progress, total_talents',
           ),
+        client.from('talents_safe').select('id, tree_key, name, is_supreme, is_hidden'),
+        client.from('talent_progress_safe').select('talent_id, points'),
       ])
 
       if (cancelled) return
@@ -198,6 +208,13 @@ function App() {
         setProgressError(
           'Não foi possível carregar a distribuição de pontos.',
         )
+        setProgressReady(true)
+        return
+      }
+
+      if (talentsResult.error || talentProgressResult.error) {
+        console.error('Erro ao carregar talentos ativos do Dashboard:', talentsResult.error?.message ?? talentProgressResult.error?.message)
+        setProgressError('Não foi possível carregar os talentos ativos do Dashboard.')
         setProgressReady(true)
         return
       }
@@ -255,6 +272,19 @@ function App() {
         tree.visible = visible
       }
 
+      const pointsByTalent = new Map((talentProgressResult.data ?? []).map((row) => [row.talent_id, Number(row.points)]))
+      const activeByTree: Record<string, ActiveTalentSummary[]> = {}
+      const activeSupremes: ActiveTalentSummary[] = []
+      for (const talent of talentsResult.data ?? []) {
+        const points = pointsByTalent.get(talent.id) ?? 0
+        if (points <= 0 || talent.is_hidden) continue
+        const item = { id: talent.id, name: talent.name, tree_key: talent.tree_key, points, is_supreme: talent.is_supreme }
+        if (talent.is_supreme || talent.tree_key === 'supremo') activeSupremes.push(item)
+        else (activeByTree[talent.tree_key] ??= []).push(item)
+      }
+      setActiveTalentsByTree(activeByTree)
+      setActiveSupremeTalents(activeSupremes)
+
       setCharacterLevel(loadedLevel)
       setTotalDistributed(distributed)
       setTreeProgress(nextTreeProgress)
@@ -267,6 +297,31 @@ function App() {
       cancelled = true
     }
   }, [userId, progressRefresh])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadSupremeCount() {
+      if (!userId || !supabase) {
+        setSupremeAvailableCount(0)
+        return
+      }
+
+      const { data, error } = await supabase.rpc('get_available_supreme_talents_count')
+      if (cancelled) return
+
+      if (error) {
+        console.error('Erro ao consultar talentos supremos disponíveis:', error.message)
+        setSupremeAvailableCount(0)
+        return
+      }
+
+      setSupremeAvailableCount(Number(data) || 0)
+    }
+
+    void loadSupremeCount()
+    return () => { cancelled = true }
+  }, [userId, supremeRefresh, progressRefresh])
 
   const treesWithProgress: Tree[] = useMemo(
     () =>
@@ -332,6 +387,7 @@ function App() {
   useEffect(() => {
     setActivePage('dashboard')
     setVisitedPages(new Set<PageKey>(['dashboard']))
+    setPendingTalentId(null)
     setLevelUpdateMessage(null)
   }, [userId])
 
@@ -364,6 +420,10 @@ function App() {
     setVisitedPages(new Set<PageKey>(['dashboard']))
     setIsAdmin(false)
     setTreeProgress({})
+    setActiveTalentsByTree({})
+    setActiveSupremeTalents([])
+    setPendingTalentId(null)
+    setSupremeAvailableCount(0)
     setTotalDistributed(0)
     setLevelUpdateMessage(null)
   }
@@ -420,6 +480,9 @@ function App() {
           />
         )
 
+      case 'reset':
+        return <ResetProgress onResetComplete={() => { setProgressRefresh((value) => value + 1); setSupremeRefresh((value) => value + 1) }} />
+
       case 'backup':
         return (
           <AdminPlaceholder
@@ -438,7 +501,8 @@ function App() {
     if (
       page === 'talents' ||
       page === 'history' ||
-      page === 'backup'
+      page === 'backup' ||
+      page === 'reset'
     ) {
       return renderAdminPage(page)
     }
@@ -447,10 +511,12 @@ function App() {
       return (
         <Dashboard
           trees={treesWithProgress}
+          activeTalentsByTree={activeTalentsByTree}
+          activeSupremeTalents={activeSupremeTalents}
+          isAdmin={isAdmin && adminCheckReady}
           totalAvailable={totalAvailable}
           totalDistributed={totalDistributed}
           characterLevel={characterLevel}
-          isAdmin={isAdmin && adminCheckReady}
           isUpdatingLevel={isUpdatingLevel}
           levelUpdateMessage={levelUpdateMessage}
           onChangeCharacterLevel={handleChangeCharacterLevel}
@@ -460,7 +526,25 @@ function App() {
     }
 
     if (page === 'supremas') {
-      return <SupremeTalents />
+      return (
+        <SupremeTalents
+          isAdmin={isAdmin && adminCheckReady}
+          totalAvailable={totalAvailable}
+          totalDistributed={totalDistributed}
+          refreshKey={supremeRefresh}
+          focusTalentId={pendingTalentId}
+          onFocusTalentHandled={() => setPendingTalentId(null)}
+          onProgressChanged={(_treeId, previousPoints, updatedPoints) => {
+            const difference = updatedPoints - previousPoints
+            setTotalDistributed((current) => current + difference)
+            setSupremeRefresh((current) => current + 1)
+          }}
+          onTalentDeleted={(_treeId, removedPoints, _wasActive) => {
+            setTotalDistributed((current) => Math.max(0, current - removedPoints))
+            setSupremeRefresh((current) => current + 1)
+          }}
+        />
+      )
     }
 
     const selectedTree = treesWithProgress.find(
@@ -474,10 +558,13 @@ function App() {
           isAdmin={isAdmin && adminCheckReady}
           totalAvailable={totalAvailable}
           totalDistributed={totalDistributed}
+          focusTalentId={pendingTalentId}
+          onFocusTalentHandled={() => setPendingTalentId(null)}
           onProgressChanged={(treeId, previousPoints, updatedPoints) => {
             const difference = updatedPoints - previousPoints
 
             setTotalDistributed((current) => current + difference)
+            setSupremeRefresh((current) => current + 1)
 
             setTreeProgress((current) => {
               const currentTree = current[treeId] ?? {
@@ -507,6 +594,7 @@ function App() {
             setTotalDistributed((current) =>
               Math.max(0, current - removedPoints),
             )
+            setSupremeRefresh((current) => current + 1)
 
             setTreeProgress((current) => {
               const currentTree = current[treeId] ?? {
@@ -536,10 +624,12 @@ function App() {
     return (
       <Dashboard
         trees={treesWithProgress}
+        activeTalentsByTree={activeTalentsByTree}
+        activeSupremeTalents={activeSupremeTalents}
+        isAdmin={isAdmin && adminCheckReady}
         totalAvailable={totalAvailable}
         totalDistributed={totalDistributed}
         characterLevel={characterLevel}
-        isAdmin={isAdmin && adminCheckReady}
         isUpdatingLevel={isUpdatingLevel}
         levelUpdateMessage={levelUpdateMessage}
         onChangeCharacterLevel={handleChangeCharacterLevel}
@@ -566,7 +656,7 @@ function App() {
     return (
       <main className="auth-screen">
         <div className="auth-loading">
-          Carregando a progressão do Compendium...
+          Convencendo Raziel a abrir...
         </div>
       </main>
     )
@@ -603,6 +693,7 @@ function App() {
       activePage={activePage}
       trees={treesWithProgress}
       isAdmin={isAdmin && adminCheckReady}
+      supremeAvailableCount={supremeAvailableCount}
       onNavigate={navigate}
       onSignOut={handleSignOut}
     >

@@ -2,8 +2,11 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
   AlertCircle,
+  CheckCircle2,
   BookOpen,
   Eye,
+  GripVertical,
+  ArrowUpDown,
   Minus,
   Pencil,
   Plus,
@@ -27,6 +30,9 @@ type Talent = {
   max_level: number
   is_hidden: boolean
   is_supreme: boolean
+  sort_order: number
+  analyses_required: number
+  analyses_completed: number
   current_points: number
 }
 
@@ -61,6 +67,8 @@ type TalentForm = {
   description: string
   max_level: number
   is_hidden: boolean
+  analyses_required: number
+  analyses_completed: number
   prerequisites: Array<{
     prerequisite_talent_id: string
     required_points: number
@@ -87,6 +95,8 @@ type TalentTreeProps = {
   isAdmin: boolean
   totalAvailable: number
   totalDistributed: number
+  focusTalentId?: string | null
+  onFocusTalentHandled?: () => void
   onProgressChanged: (
     treeId: string,
     previousPoints: number,
@@ -108,6 +118,8 @@ const emptyForm: TalentForm = {
   description: '',
   max_level: 1,
   is_hidden: false,
+  analyses_required: 0,
+  analyses_completed: 0,
   prerequisites: [],
   treeRequirements: [],
 }
@@ -172,16 +184,22 @@ function treeName(treeKey: string) {
 
   return trees.find((t) => t.id === treeKey)?.name ?? treeKey
 }
+const TALENTS_PER_PAGE = 10
 
 export default function TalentTree({
   tree,
   isAdmin,
   totalAvailable,
+  focusTalentId,
+  onFocusTalentHandled,
   onProgressChanged,
   onTalentDeleted,
 }: TalentTreeProps) {
   const Icon = tree.icon
-
+  const [currentPage, setCurrentPage] = useState(1)
+  const [sortingMode, setSortingMode] = useState(false)
+  const [draggedTalentId, setDraggedTalentId] = useState<string | null>(null)
+  const [savingOrder, setSavingOrder] = useState(false)
   const [talents, setTalents] = useState<TalentWithPrerequisites[]>([])
   const [treeDistributed, setTreeDistributed] = useState(0)
   const [selectedTalent, setSelectedTalent] =
@@ -208,6 +226,7 @@ export default function TalentTree({
   const [selectedFilter, setSelectedFilter] = useState<
     'all' | 'active' | 'inactive' | 'unknown'
   >('all')
+  const [pointsFilter, setPointsFilter] = useState<'all' | 'with' | 'without'>('all')
 
   useEffect(() => {
     let cancelled = false
@@ -223,12 +242,12 @@ export default function TalentTree({
       }
 
       const { data: talentData, error: talentError } = await supabase
-        .from('talents')
+        .from('talents_safe')
         .select(
-          'id, tree_key, name, icon_url, description, max_level, is_hidden, is_supreme',
+          'id, tree_key, name, icon_url, description, max_level, is_hidden, is_supreme, analyses_required, analyses_completed, sort_order, created_at',
         )
         .eq('tree_key', tree.id)
-        .order('created_at', { ascending: true })
+        .order('sort_order', { ascending: true }).order('created_at', { ascending: true })
 
       if (cancelled) return
 
@@ -259,26 +278,17 @@ export default function TalentTree({
         progressResult,
       ] = await Promise.all([
         supabase
-          .from('talent_prerequisites')
-          .select(`
-            talent_id,
-            required_points,
-            prerequisite:talents!talent_prerequisites_prerequisite_talent_id_fkey (
-              id,
-              name,
-              tree_key,
-              is_hidden
-            )
-          `)
+          .from('talent_prerequisites_safe')
+          .select('talent_id, prerequisite_talent_id, required_points, prerequisite_name, prerequisite_tree_key, prerequisite_is_hidden')
           .in('talent_id', talentIds),
 
         supabase
-          .from('talent_tree_requirements')
+          .from('talent_tree_requirements_safe')
           .select('talent_id, required_tree_key, required_points')
           .in('talent_id', talentIds),
 
         supabase
-          .from('talent_progress')
+          .from('talent_progress_safe')
           .select('talent_id, points')
           .in('talent_id', talentIds),
       ])
@@ -321,8 +331,17 @@ export default function TalentTree({
         return
       }
 
-      const loadedPrerequisites =
-        (prerequisiteResult.data ?? []) as unknown as TalentPrerequisite[]
+      const loadedPrerequisites: TalentPrerequisite[] =
+        (prerequisiteResult.data ?? []).map((item) => ({
+          talent_id: item.talent_id,
+          required_points: Number(item.required_points),
+          prerequisite: {
+            id: item.prerequisite_talent_id,
+            name: item.prerequisite_name,
+            tree_key: item.prerequisite_tree_key,
+            is_hidden: item.prerequisite_is_hidden,
+          },
+        }))
 
       const loadedTreeRequirements =
         (treeRequirementResult.data ?? []) as TalentTreeRequirement[]
@@ -385,6 +404,15 @@ export default function TalentTree({
     setSelectedTalent(talent)
   }
 
+  useEffect(() => {
+    if (!focusTalentId || loading) return
+    const talent = talents.find((item) => item.id === focusTalentId)
+    if (talent) {
+      setSelectedTalent(talent)
+      onFocusTalentHandled?.()
+    }
+  }, [focusTalentId, loading, talents, onFocusTalentHandled])
+
   async function changeTalentPoints(
     talent: TalentWithPrerequisites,
     delta: 1 | -1,
@@ -417,11 +445,11 @@ export default function TalentTree({
       )
         ? 'Não é possível remover estes pontos: outro talento ativo depende deles.'
         : databaseMessage.includes(
-              'Os pré-requisitos deste talento não foram atendidos',
-            )
+          'Os pré-requisitos deste talento não foram atendidos',
+        )
           ? 'Os pré-requisitos deste talento não foram atendidos.'
           : databaseMessage ||
-            'Não foi possível alterar os pontos deste talento.'
+          'Não foi possível alterar os pontos deste talento.'
 
       setProgressMessage(friendlyMessage)
       setUpdatingTalentId(null)
@@ -510,9 +538,8 @@ export default function TalentTree({
 
     if (prerequisiteResult.error || treeRequirementResult.error) {
       setError(
-        `Não foi possível carregar os requisitos: ${
-          prerequisiteResult.error?.message ??
-          treeRequirementResult.error?.message
+        `Não foi possível carregar os requisitos: ${prerequisiteResult.error?.message ??
+        treeRequirementResult.error?.message
         }`,
       )
       return
@@ -534,6 +561,8 @@ export default function TalentTree({
       description: talent.description ?? '',
       max_level: talent.max_level,
       is_hidden: talent.is_hidden,
+      analyses_required: talent.analyses_required ?? 0,
+      analyses_completed: talent.analyses_completed ?? 0,
 
       prerequisites: (prerequisiteResult.data ?? []).map((item) => ({
         prerequisite_talent_id: item.prerequisite_talent_id,
@@ -571,15 +600,15 @@ export default function TalentTree({
 
       prerequisites: checked
         ? [
-            ...current.prerequisites,
-            {
-              prerequisite_talent_id: talentId,
-              required_points: 1,
-            },
-          ]
+          ...current.prerequisites,
+          {
+            prerequisite_talent_id: talentId,
+            required_points: 1,
+          },
+        ]
         : current.prerequisites.filter(
-            (item) => item.prerequisite_talent_id !== talentId,
-          ),
+          (item) => item.prerequisite_talent_id !== talentId,
+        ),
     }))
   }
 
@@ -680,6 +709,19 @@ export default function TalentTree({
       return
     }
 
+    const analysesRequired = Number(form.analyses_required)
+    const analysesCompleted = Number(form.analyses_completed)
+
+    if (
+      !Number.isInteger(analysesRequired) ||
+      analysesRequired < 0 ||
+      !Number.isInteger(analysesCompleted) ||
+      analysesCompleted < 0
+    ) {
+      setError('As quantidades de análises devem ser números inteiros iguais ou maiores que zero.')
+      return
+    }
+
     if (iconUrl && !/^https?:\/\/.+/i.test(iconUrl)) {
       setError('Informe uma URL válida para a imagem do ícone.')
       return
@@ -734,6 +776,8 @@ export default function TalentTree({
       max_level: maxLevel,
       is_hidden: form.is_hidden,
       is_supreme: form.tree_key === 'supremo',
+      analyses_required: form.is_hidden && form.tree_key !== 'supremo' ? analysesRequired : 0,
+      analyses_completed: form.is_hidden && form.tree_key !== 'supremo' ? analysesCompleted : 0,
     }
 
     const result = await supabase
@@ -745,8 +789,7 @@ export default function TalentTree({
 
     if (result.error || !result.data) {
       setError(
-        `Não foi possível salvar o talento: ${
-          result.error?.message ?? 'registro não retornado'
+        `Não foi possível salvar o talento: ${result.error?.message ?? 'registro não retornado'
         }`,
       )
       setSaving(false)
@@ -867,8 +910,7 @@ export default function TalentTree({
 
     if (progressError || linksError) {
       setDeleteError(
-        `Não foi possível verificar os vínculos e pontos: ${
-          progressError?.message ?? linksError?.message
+        `Não foi possível verificar os vínculos e pontos: ${progressError?.message ?? linksError?.message
         }`,
       )
       setDeleteLoading(false)
@@ -899,9 +941,8 @@ export default function TalentTree({
 
       if (dependentError || dependentProgressError) {
         setDeleteError(
-          `Não foi possível verificar os talentos dependentes: ${
-            dependentError?.message ??
-            dependentProgressError?.message
+          `Não foi possível verificar os talentos dependentes: ${dependentError?.message ??
+          dependentProgressError?.message
           }`,
         )
         setDeleteLoading(false)
@@ -972,11 +1013,49 @@ export default function TalentTree({
     setReloadKey((current) => current + 1)
   }
 
+  async function persistTalentOrder(orderedTalents: TalentWithPrerequisites[]) {
+    if (!supabase || savingOrder) return
+    setSavingOrder(true)
+    setProgressMessage(null)
+
+    const updates = await Promise.all(
+      orderedTalents.map((talent, index) =>
+        supabase!.from('talents').update({ sort_order: index + 1 }).eq('id', talent.id),
+      ),
+    )
+    const failedUpdate = updates.find((result) => result.error)
+    if (failedUpdate?.error) {
+      setProgressMessage(`Não foi possível salvar a ordenação: ${failedUpdate.error.message}`)
+      setSavingOrder(false)
+      setReloadKey((current) => current + 1)
+      return
+    }
+
+    setTalents(orderedTalents.map((talent, index) => ({ ...talent, sort_order: index + 1 })))
+    setProgressMessage('Ordem dos talentos atualizada com sucesso.')
+    setSavingOrder(false)
+  }
+
+  function handleTalentDrop(targetTalentId: string) {
+    if (!draggedTalentId || draggedTalentId === targetTalentId || savingOrder) {
+      setDraggedTalentId(null)
+      return
+    }
+    const reordered = [...talents]
+    const from = reordered.findIndex((item) => item.id === draggedTalentId)
+    const to = reordered.findIndex((item) => item.id === targetTalentId)
+    if (from < 0 || to < 0) { setDraggedTalentId(null); return }
+    const [moved] = reordered.splice(from, 1)
+    reordered.splice(to, 0, moved)
+    setDraggedTalentId(null)
+    void persistTalentOrder(reordered)
+  }
+
   const normalizedSearch = searchTerm
     .trim()
     .toLocaleLowerCase('pt-BR')
 
-  const filteredTalents = talents.filter((talent) => {
+  const filteredTalents = sortingMode ? talents : talents.filter((talent) => {
     const matchesFilter =
       selectedFilter === 'all' ||
       (selectedFilter === 'active' &&
@@ -987,13 +1066,47 @@ export default function TalentTree({
         talent.current_points === 0) ||
       (selectedFilter === 'unknown' && talent.is_hidden)
 
+    const matchesPoints =
+      pointsFilter === 'all' ||
+      (pointsFilter === 'with' && talent.current_points > 0) ||
+      (pointsFilter === 'without' && talent.current_points === 0)
+
     const matchesSearch =
       normalizedSearch.length === 0 ||
       (!talent.is_hidden &&
         talent.name.toLocaleLowerCase('pt-BR').includes(normalizedSearch))
 
-    return matchesFilter && matchesSearch
+    return matchesFilter && matchesPoints && matchesSearch
   })
+
+  const totalPages = sortingMode ? 1 : Math.ceil(
+    filteredTalents.length / TALENTS_PER_PAGE,
+  )
+
+  const safeCurrentPage = Math.min(
+    currentPage,
+    Math.max(totalPages, 1),
+  )
+
+  const startIndex = (safeCurrentPage - 1) * TALENTS_PER_PAGE
+
+  const paginatedTalents = sortingMode
+    ? filteredTalents
+    : filteredTalents.slice(startIndex, startIndex + TALENTS_PER_PAGE)
+
+  const firstVisibleTalent =
+    filteredTalents.length > 0 ? startIndex + 1 : 0
+
+  const lastVisibleTalent = Math.min(
+    startIndex + TALENTS_PER_PAGE,
+    filteredTalents.length,
+  )
+
+  useEffect(() => {
+    if (currentPage !== safeCurrentPage) {
+      setCurrentPage(safeCurrentPage)
+    }
+  }, [currentPage, safeCurrentPage])
 
   return (
     <>
@@ -1008,8 +1121,21 @@ export default function TalentTree({
           <p>{tree.subtitle}.</p>
         </div>
 
-        <div className="tree-page-icon">
-          <Icon size={27} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          {isAdmin && (
+            <button type="button" onClick={() => {
+              setSortingMode((current) => !current)
+              setSearchTerm('')
+              setSelectedFilter('all')
+              setPointsFilter('all')
+              setCurrentPage(1)
+              setDraggedTalentId(null)
+            }} disabled={savingOrder || loading} aria-pressed={sortingMode}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', minHeight: '38px', padding: '0 12px', border: `1px solid ${sortingMode ? '#b9a47e' : '#e5e5e0'}`, borderRadius: '7px', background: sortingMode ? '#f2eee5' : 'rgba(255,255,255,.72)', color: sortingMode ? '#806d4c' : '#64788a', cursor: savingOrder ? 'wait' : 'pointer', font: 'inherit', fontSize: '10px', letterSpacing: '.4px', fontWeight: 700 }}>
+              <ArrowUpDown size={14} />{sortingMode ? 'SAIR DA ORDENAÇÃO' : 'ORDENAÇÃO'}
+            </button>
+          )}
+          <div className="tree-page-icon"><Icon size={27} /></div>
         </div>
       </section>
 
@@ -1033,21 +1159,40 @@ export default function TalentTree({
         <div
           className="talent-progress-alert"
           role="status"
-          style={errorAlertStyle}
+          style={
+            progressMessage === 'Ordem dos talentos atualizada com sucesso.' ||
+            progressMessage === 'Talento atualizado com sucesso.'
+              ? {
+                  ...errorAlertStyle,
+                  border: '1px solid #bfdbfe',
+                  background: '#eff6ff',
+                  color: '#1d4ed8',
+                }
+              : errorAlertStyle
+          }
         >
-          <AlertCircle
-            size={15}
-            style={{ flexShrink: 0, marginTop: '1px' }}
-          />
+          {progressMessage === 'Ordem dos talentos atualizada com sucesso.' ||
+          progressMessage === 'Talento atualizado com sucesso.' ? (
+            <CheckCircle2
+              size={15}
+              style={{ flexShrink: 0, marginTop: '1px' }}
+              aria-hidden="true"
+            />
+          ) : (
+            <AlertCircle
+              size={15}
+              style={{ flexShrink: 0, marginTop: '1px' }}
+            />
+          )}
           <span>{progressMessage}</span>
         </div>
       )}
 
       {loading && (
         <section className="tree-feedback">
-          <RefreshCw size={22} className="tree-loading-icon" />
-          <h2>Consultando o conhecimento...</h2>
-          <p>Carregando os talentos desta árvore.</p>
+          <span className="tree-loading-book" aria-hidden="true"><img src="/images/book-loading.gif" alt="" /></span>
+          <h2>Folheando para encontrar a página correta...</h2>
+          <p>Consultando os registros do Compendium.</p>
         </section>
       )}
 
@@ -1086,7 +1231,7 @@ export default function TalentTree({
 
       {!loading && !error && talents.length > 0 && (
         <>
-          <section
+          {!sortingMode && <section
             className="talent-browser-controls"
             style={{
               display: 'flex',
@@ -1113,7 +1258,10 @@ export default function TalentTree({
               <input
                 type="search"
                 value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
+                onChange={(event) => {
+                  setSearchTerm(event.target.value)
+                  setCurrentPage(1)
+                }}
                 placeholder="Pesquisar talento pelo nome..."
                 aria-label="Pesquisar talento pelo nome"
                 style={{
@@ -1130,7 +1278,10 @@ export default function TalentTree({
               {searchTerm && (
                 <button
                   type="button"
-                  onClick={() => setSearchTerm('')}
+                  onClick={() => {
+                    setSearchTerm('')
+                    setCurrentPage(1)
+                  }}
                   aria-label="Limpar pesquisa"
                   style={{
                     display: 'grid',
@@ -1169,13 +1320,15 @@ export default function TalentTree({
                     key={filter.value}
                     type="button"
                     aria-pressed={isSelected}
-                    onClick={() => setSelectedFilter(filter.value)}
+                    onClick={() => {
+                      setSelectedFilter(filter.value)
+                      setCurrentPage(1)
+                    }}
                     style={{
                       minHeight: '34px',
                       padding: '7px 13px',
-                      border: `1px solid ${
-                        isSelected ? '#b9a47e' : '#e5e5e0'
-                      }`,
+                      border: `1px solid ${isSelected ? '#b9a47e' : '#e5e5e0'
+                        }`,
                       borderRadius: '20px',
                       background: isSelected
                         ? '#f2eee5'
@@ -1194,6 +1347,19 @@ export default function TalentTree({
               })}
             </div>
 
+            <div role="group" aria-label="Filtrar por pontos distribuídos" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}>
+              <span style={{ color: '#9aa1a6', fontSize: '9px', letterSpacing: '.5px', fontWeight: 700 }}>PONTOS:</span>
+              {([
+                { value: 'all', label: 'Qualquer quantidade' },
+                { value: 'with', label: 'Com pontos distribuídos' },
+                { value: 'without', label: 'Sem pontos distribuídos' },
+              ] as const).map((filter) => {
+                const isSelected = pointsFilter === filter.value
+                return <button key={filter.value} type="button" aria-pressed={isSelected} onClick={() => { setPointsFilter(filter.value); setCurrentPage(1) }} style={{ minHeight: '31px', padding: '6px 11px', border: `1px solid ${isSelected ? '#b9a47e' : '#e5e5e0'}`, borderRadius: '16px', background: isSelected ? '#f2eee5' : 'rgba(255,255,255,.72)', color: isSelected ? '#806d4c' : '#7d8993', cursor: 'pointer', font: 'inherit', fontSize: '9px', transition: 'all .18s ease' }}>{filter.label}</button>
+              })}
+              {(searchTerm || selectedFilter !== 'all' || pointsFilter !== 'all') && <button type="button" className="tree-retry-button" onClick={() => { setSearchTerm(''); setSelectedFilter('all'); setPointsFilter('all'); setCurrentPage(1) }}>Limpar filtros</button>}
+            </div>
+
             <span
               style={{
                 color: '#9aa1a6',
@@ -1201,13 +1367,18 @@ export default function TalentTree({
                 letterSpacing: '.3px',
               }}
             >
-              Exibindo {filteredTalents.length} de {talents.length} talentos
+              Exibindo {firstVisibleTalent}–{lastVisibleTalent} de{' '}
+              {filteredTalents.length} talentos
             </span>
-          </section>
+          </section>}
+
+          {sortingMode && <div style={{ margin: '18px 0', color: '#806d4c', fontSize: '11px' }}>
+            {savingOrder ? 'Salvando nova ordem...' : 'Segure o ícone e arraste os talentos para definir a ordem de apresentação. Todos os talentos desta árvore estão visíveis.'}
+          </div>}
 
           {filteredTalents.length > 0 ? (
             <section className="talent-tree-list">
-              {filteredTalents.map((talent) => {
+              {paginatedTalents.map((talent) => {
                 const isUpdating = updatingTalentId === talent.id
                 const isAnyTalentUpdating = updatingTalentId !== null
 
@@ -1219,8 +1390,19 @@ export default function TalentTree({
                   <article
                     className="talent-tree-card talent-tree-card-clickable"
                     key={talent.id}
+                    onDragOver={(event) => { if (sortingMode) event.preventDefault() }}
+                    onDrop={(event) => { if (sortingMode) { event.preventDefault(); handleTalentDrop(talent.id) } }}
+                    style={{ opacity: sortingMode && draggedTalentId === talent.id ? 0.45 : 1, outline: sortingMode ? '1px dashed #c9b58f' : undefined }}
                   >
                     <div className="talent-tree-card-header">
+                      {sortingMode && <button type="button" draggable={!savingOrder}
+                        aria-label={`Arrastar ${talent.is_hidden ? 'talento oculto' : talent.name}`}
+                        title="Segure e arraste para reordenar"
+                        onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', talent.id); setDraggedTalentId(talent.id) }}
+                        onDragEnd={() => setDraggedTalentId(null)} disabled={savingOrder}
+                        style={{ display: 'grid', placeItems: 'center', width: '30px', minWidth: '30px', alignSelf: 'center', border: 0, background: 'transparent', color: '#9a8765', cursor: savingOrder ? 'wait' : 'grab', touchAction: 'none' }}>
+                        <GripVertical size={19} />
+                      </button>}
                       <div className="talent-tree-icon">
                         {talent.icon_url && !talent.is_hidden ? (
                           <img
@@ -1251,6 +1433,56 @@ export default function TalentTree({
                             POSSUI PRÉ-REQUISITOS
                           </span>
                         )}
+
+                        {talent.is_hidden && !talent.is_supreme && (
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '6px',
+                              width: 'min(100%, 230px)',
+                              marginTop: '8px',
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                gap: '10px',
+                                color: '#8b795c',
+                                fontSize: '10px',
+                              }}
+                            >
+                              <span>ANÁLISES REALIZADAS</span>
+                              <strong>
+                                {talent.analyses_completed} / {talent.analyses_required}
+                              </strong>
+                            </div>
+                            <div
+                              role="progressbar"
+                              aria-label="Progresso das análises"
+                              aria-valuemin={0}
+                              aria-valuemax={talent.analyses_required}
+                              aria-valuenow={Math.min(talent.analyses_completed, talent.analyses_required)}
+                              style={{
+                                height: '5px',
+                                overflow: 'hidden',
+                                borderRadius: '10px',
+                                background: '#e9e3d7',
+                              }}
+                            >
+                              <div
+                                style={{
+                                  width: `${talent.analyses_required > 0 ? Math.min(100, (talent.analyses_completed / talent.analyses_required) * 100) : 0}%`,
+                                  height: '100%',
+                                  borderRadius: '10px',
+                                  background: '#b49a6b',
+                                  transition: 'width .2s ease',
+                                }}
+                              />
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -1280,12 +1512,12 @@ export default function TalentTree({
                               ...pointButtonStyle,
                               opacity:
                                 isAnyTalentUpdating ||
-                                talent.current_points <= 0
+                                  talent.current_points <= 0
                                   ? 0.45
                                   : 1,
                               cursor:
                                 isAnyTalentUpdating ||
-                                talent.current_points <= 0
+                                  talent.current_points <= 0
                                   ? 'not-allowed'
                                   : 'pointer',
                             }}
@@ -1309,14 +1541,14 @@ export default function TalentTree({
                               ...pointButtonStyle,
                               opacity:
                                 isAnyTalentUpdating ||
-                                totalAvailable <= 0 ||
-                                talent.current_points >= talent.max_level
+                                  totalAvailable <= 0 ||
+                                  talent.current_points >= talent.max_level
                                   ? 0.45
                                   : 1,
                               cursor:
                                 isAnyTalentUpdating ||
-                                totalAvailable <= 0 ||
-                                talent.current_points >= talent.max_level
+                                  totalAvailable <= 0 ||
+                                  talent.current_points >= talent.max_level
                                   ? 'not-allowed'
                                   : 'pointer',
                             }}
@@ -1388,7 +1620,90 @@ export default function TalentTree({
                   </article>
                 )
               })}
+              {!sortingMode && totalPages > 1 && (
+                <nav
+                  className="talent-pagination"
+                  aria-label="Paginação dos talentos"
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '7px',
+                    margin: '24px 0 12px',
+                  }}
+                >
+                  <button
+                    type="button"
+                    disabled={safeCurrentPage === 1}
+                    onClick={() => setCurrentPage((page) => page - 1)}
+                    style={{
+                      padding: '8px 12px',
+                      border: '1px solid #e5e5e0',
+                      borderRadius: '6px',
+                      background: '#fff',
+                      color: '#64788a',
+                      cursor: safeCurrentPage === 1 ? 'not-allowed' : 'pointer',
+                      opacity: safeCurrentPage === 1 ? 0.45 : 1,
+                      fontSize: '11px',
+                    }}
+                  >
+                    Anterior
+                  </button>
+
+                  {Array.from({ length: totalPages }, (_, index) => index + 1).map(
+                    (page) => {
+                      const isCurrentPage = page === safeCurrentPage
+
+                      return (
+                        <button
+                          key={page}
+                          type="button"
+                          aria-current={isCurrentPage ? 'page' : undefined}
+                          onClick={() => setCurrentPage(page)}
+                          style={{
+                            minWidth: '34px',
+                            height: '34px',
+                            padding: '0 8px',
+                            border: `1px solid ${isCurrentPage ? '#b9a47e' : '#e5e5e0'
+                              }`,
+                            borderRadius: '6px',
+                            background: isCurrentPage ? '#f2eee5' : '#fff',
+                            color: isCurrentPage ? '#806d4c' : '#7d8993',
+                            cursor: 'pointer',
+                            fontSize: '11px',
+                            fontWeight: isCurrentPage ? 700 : 400,
+                          }}
+                        >
+                          {page}
+                        </button>
+                      )
+                    },
+                  )}
+
+                  <button
+                    type="button"
+                    disabled={safeCurrentPage === totalPages}
+                    onClick={() => setCurrentPage((page) => page + 1)}
+                    style={{
+                      padding: '8px 12px',
+                      border: '1px solid #e5e5e0',
+                      borderRadius: '6px',
+                      background: '#fff',
+                      color: '#64788a',
+                      cursor:
+                        safeCurrentPage === totalPages ? 'not-allowed' : 'pointer',
+                      opacity: safeCurrentPage === totalPages ? 0.45 : 1,
+                      fontSize: '11px',
+                    }}
+                  >
+                    Próxima
+                  </button>
+                </nav>
+              )}
             </section>
+
+
           ) : (
             <section className="tree-feedback">
               <Search size={22} />
@@ -1513,7 +1828,40 @@ export default function TalentTree({
                   )}
                 </label>
 
-                <label>
+                {form.is_hidden && form.tree_key !== 'supremo' && (
+                  <>
+                    <label>
+                      <span>Análises necessárias</span>
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        required
+                        value={form.analyses_required}
+                        onChange={(event) =>
+                          updateForm('analyses_required', Number(event.target.value))
+                        }
+                      />
+                    </label>
+
+                    <label>
+                      <span>Análises realizadas</span>
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        required
+                        value={form.analyses_completed}
+                        onChange={(event) =>
+                          updateForm('analyses_completed', Number(event.target.value))
+                        }
+                      />
+                    </label>
+                  </>
+                )}
+
+
+                <label className="talent-form-full">
                   <span>Nível máximo</span>
 
                   <input
@@ -1593,9 +1941,8 @@ export default function TalentTree({
 
                         return (
                           <label
-                            className={`talent-prerequisite-option ${
-                              selected ? 'selected' : ''
-                            }`}
+                            className={`talent-prerequisite-option ${selected ? 'selected' : ''
+                              }`}
                             key={t.id}
                           >
                             <input
@@ -1610,10 +1957,11 @@ export default function TalentTree({
                             />
 
                             <span>
-                              <strong>
-                                {t.is_hidden ? '???' : t.name}
-                              </strong>
-                              <small>{treeName(t.tree_key)}</small>
+                              <strong>{t.name}</strong>
+                              <small>
+                                {treeName(t.tree_key)}
+                                {t.is_hidden ? ' • Oculto' : ''}
+                              </small>
                             </span>
                           </label>
                         )
@@ -1913,11 +2261,10 @@ export default function TalentTree({
                           <li key={dependent.id}>
                             {dependent.name}
                             {dependent.points > 0
-                              ? ` — ${dependent.points} ${
-                                  dependent.points === 1
-                                    ? 'ponto distribuído'
-                                    : 'pontos distribuídos'
-                                }`
+                              ? ` — ${dependent.points} ${dependent.points === 1
+                                ? 'ponto distribuído'
+                                : 'pontos distribuídos'
+                              }`
                               : ' — sem pontos distribuídos'}
                           </li>
                         ))}
@@ -1964,11 +2311,10 @@ export default function TalentTree({
                     }}
                   >
                     {deletePoints > 0
-                      ? `${deletePoints} ${
-                          deletePoints === 1
-                            ? 'ponto distribuído será removido'
-                            : 'pontos distribuídos serão removidos'
-                        } da progressão global.`
+                      ? `${deletePoints} ${deletePoints === 1
+                        ? 'ponto distribuído será removido'
+                        : 'pontos distribuídos serão removidos'
+                      } da progressão global.`
                       : 'Este talento não possui pontos distribuídos.'}
                   </div>
                 </>
@@ -2179,48 +2525,48 @@ export default function TalentTree({
 
                 {(selectedTalent.prerequisites.length > 0 ||
                   selectedTalent.treeRequirements.length > 0) && (
-                  <section
-                    className="talent-tree-prerequisites"
-                    style={{ gap: '12px' }}
-                  >
-                    <span>PRÉ-REQUISITOS</span>
+                    <section
+                      className="talent-tree-prerequisites"
+                      style={{ gap: '12px' }}
+                    >
+                      <span>PRÉ-REQUISITOS</span>
 
-                    <ul>
-                      {selectedTalent.prerequisites.map((prerequisite) => (
-                        <li key={prerequisite.talent_id}>
-                          <span>
-                            {prerequisite.prerequisite?.is_hidden
-                              ? '???'
-                              : prerequisite.prerequisite?.name ??
+                      <ul>
+                        {selectedTalent.prerequisites.map((prerequisite) => (
+                          <li key={prerequisite.talent_id}>
+                            <span>
+                              {prerequisite.prerequisite?.is_hidden
+                                ? '???'
+                                : prerequisite.prerequisite?.name ??
                                 'Talento desconhecido'}
-                          </span>
+                            </span>
 
-                          <strong>
-                            {prerequisite.required_points}{' '}
-                            {prerequisite.required_points === 1
-                              ? 'ponto'
-                              : 'pontos'}
-                          </strong>
-                        </li>
-                      ))}
+                            <strong>
+                              {prerequisite.required_points}{' '}
+                              {prerequisite.required_points === 1
+                                ? 'ponto'
+                                : 'pontos'}
+                            </strong>
+                          </li>
+                        ))}
 
-                      {selectedTalent.treeRequirements.map((requirement) => (
-                        <li key={requirement.required_tree_key}>
-                          <span>
-                            {treeName(requirement.required_tree_key)}
-                          </span>
+                        {selectedTalent.treeRequirements.map((requirement) => (
+                          <li key={requirement.required_tree_key}>
+                            <span>
+                              {treeName(requirement.required_tree_key)}
+                            </span>
 
-                          <strong>
-                            {requirement.required_points}{' '}
-                            {requirement.required_points === 1
-                              ? 'ponto na árvore'
-                              : 'pontos na árvore'}
-                          </strong>
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
-                )}
+                            <strong>
+                              {requirement.required_points}{' '}
+                              {requirement.required_points === 1
+                                ? 'ponto na árvore'
+                                : 'pontos na árvore'}
+                            </strong>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
               </div>
             )}
           </section>

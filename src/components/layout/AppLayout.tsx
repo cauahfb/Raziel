@@ -8,12 +8,13 @@ type AppLayoutProps = {
   activePage: PageKey
   trees: Tree[]
   isAdmin: boolean
+  supremeAvailableCount: number
   onNavigate: (page: PageKey) => void
   onSignOut: () => void
   children: ReactNode
 }
 
-export default function AppLayout({ activePage, trees, isAdmin, onNavigate, onSignOut, children }: AppLayoutProps) {
+export default function AppLayout({ activePage, trees, isAdmin, supremeAvailableCount, onNavigate, onSignOut, children }: AppLayoutProps) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const selectedTree = trees.find((tree) => tree.id === activePage)
   const breadcrumb = selectedTree?.name.toUpperCase() ?? (activePage === 'supremas' ? 'CONHECIMENTO RESTRITO' : activePage === 'history' || activePage === 'backup' ? 'ÁREA ADMINISTRATIVA' : 'VISÃO GERAL')
@@ -24,14 +25,14 @@ export default function AppLayout({ activePage, trees, isAdmin, onNavigate, onSi
   }
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar"><Sidebar activePage={activePage} trees={trees} isAdmin={isAdmin} onNavigate={navigate} /></aside>
+    <div className={`app-shell ${activePage === 'supremas' ? 'supreme-theme' : ''}`}>
+      <aside className="sidebar"><Sidebar activePage={activePage} trees={trees} isAdmin={isAdmin} supremeAvailableCount={supremeAvailableCount} onNavigate={navigate} /></aside>
 
       {mobileOpen && (
         <div className="mobile-overlay" onClick={() => setMobileOpen(false)}>
           <div className="mobile-sidebar" onClick={(event) => event.stopPropagation()}>
             <button className="mobile-close" onClick={() => setMobileOpen(false)} aria-label="Fechar menu"><X size={18} /></button>
-            <Sidebar activePage={activePage} trees={trees} isAdmin={isAdmin} onNavigate={navigate} />
+            <Sidebar activePage={activePage} trees={trees} isAdmin={isAdmin} supremeAvailableCount={supremeAvailableCount} onNavigate={navigate} />
           </div>
         </div>
       )}
