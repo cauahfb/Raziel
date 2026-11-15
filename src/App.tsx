@@ -55,7 +55,11 @@ function App() {
   const [progressError, setProgressError] = useState<string | null>(null)
   const [progressRefresh, setProgressRefresh] = useState(0)
   const [supremeRefresh, setSupremeRefresh] = useState(0)
+  const progressLoadedForUser = useRef<string | null>(null)
   const [supremeAvailableCount, setSupremeAvailableCount] = useState(0)
+  const [unlockedSupremeTalentIds, setUnlockedSupremeTalentIds] = useState<string[]>([])
+  const [supremeUnlocksReady, setSupremeUnlocksReady] = useState(false)
+  const supremeUnlocksLoadedForUser = useRef<string | null>(null)
   const [supremeUnlockNotice, setSupremeUnlockNotice] = useState(false)
   const [supremeUnlockNoticeName, setSupremeUnlockNoticeName] = useState('')
   const [supremeUnlockQueue, setSupremeUnlockQueue] = useState<string[]>([])
@@ -165,10 +169,12 @@ function App() {
     let cancelled = false
 
     async function loadProgress() {
-      setProgressReady(false)
+      const isInitialLoadForUser = progressLoadedForUser.current !== userId
+      if (isInitialLoadForUser) setProgressReady(false)
       setProgressError(null)
 
       if (!userId || !supabase) {
+        progressLoadedForUser.current = null
         setProgressReady(true)
         return
       }
@@ -200,10 +206,10 @@ function App() {
           levelResult.error.message,
         )
 
-        setProgressError(
-          'Não foi possível carregar o nível global do Compendium.',
-        )
-        setProgressReady(true)
+        if (progressLoadedForUser.current !== userId) {
+          setProgressError('Não foi possível carregar o nível global do Compendium.')
+          setProgressReady(true)
+        }
         return
       }
 
@@ -213,25 +219,29 @@ function App() {
           treeProgressResult.error.message,
         )
 
-        setProgressError(
-          'Não foi possível carregar a distribuição de pontos.',
-        )
-        setProgressReady(true)
+        if (progressLoadedForUser.current !== userId) {
+          setProgressError('Não foi possível carregar a distribuição de pontos.')
+          setProgressReady(true)
+        }
         return
       }
 
       if (talentsResult.error || talentProgressResult.error || apexProgressResult.error) {
         console.error('Erro ao carregar talentos ativos do Dashboard:', talentsResult.error?.message ?? talentProgressResult.error?.message ?? apexProgressResult.error?.message)
-        setProgressError('Não foi possível carregar os talentos ativos do Dashboard.')
-        setProgressReady(true)
+        if (progressLoadedForUser.current !== userId) {
+          setProgressError('Não foi possível carregar os talentos ativos do Dashboard.')
+          setProgressReady(true)
+        }
         return
       }
 
       const loadedLevel = Number(levelResult.data.character_level)
 
       if (!Number.isInteger(loadedLevel) || loadedLevel < 1) {
-        setProgressError('O nível global armazenado no banco é inválido.')
-        setProgressReady(true)
+        if (progressLoadedForUser.current !== userId) {
+          setProgressError('O nível global armazenado no banco é inválido.')
+          setProgressReady(true)
+        }
         return
       }
 
@@ -263,10 +273,10 @@ function App() {
           !Number.isInteger(visible) ||
           visible < 0
         ) {
-          setProgressError(
-            'Foi encontrada uma distribuição de pontos inválida no banco.',
-          )
-          setProgressReady(true)
+          if (progressLoadedForUser.current !== userId) {
+            setProgressError('Foi encontrada uma distribuição de pontos inválida no banco.')
+            setProgressReady(true)
+          }
           return
         }
 
@@ -307,6 +317,7 @@ function App() {
       setCharacterLevel(loadedLevel)
       setTotalDistributed(distributed)
       setTreeProgress(nextTreeProgress)
+      progressLoadedForUser.current = userId
       setProgressReady(true)
     }
 
@@ -319,50 +330,75 @@ function App() {
 
   useEffect(() => {
     let cancelled = false
+
     async function checkNewSupremeUnlocks() {
-      if (!userId || !supabase) return
-      const [talentsResult, prerequisitesResult, treeRequirementsResult, progressResult, treeProgressResult] = await Promise.all([
-        supabase.from('talents_safe').select('id, name, is_hidden, supreme_unlocked').eq('tree_key', 'supremo').eq('is_supreme', true),
-        supabase.from('talent_prerequisites_safe').select('talent_id, prerequisite_talent_id, required_points'),
-        supabase.from('talent_tree_requirements_safe').select('talent_id, required_tree_key, required_points'),
-        supabase.from('talent_progress_safe').select('talent_id, points'),
-        supabase.from('talent_tree_progress_safe').select('tree_key, total_points'),
-      ])
-      if (cancelled) return
-      const firstError = talentsResult.error || prerequisitesResult.error || treeRequirementsResult.error || progressResult.error || treeProgressResult.error
-      if (firstError) {
-        console.error('Erro ao consultar desbloqueios supremos:', firstError.message)
+      const isInitialLoadForUser = supremeUnlocksLoadedForUser.current !== userId
+      if (isInitialLoadForUser) setSupremeUnlocksReady(false)
+
+      if (!userId || !supabase) {
+        setUnlockedSupremeTalentIds([])
+        setSupremeAvailableCount(0)
+        setSupremeUnlocksReady(true)
+        supremeUnlocksLoadedForUser.current = null
         return
       }
 
-      const progressByTalent = new Map((progressResult.data ?? []).map((row) => [row.talent_id, Number(row.points)]))
-      const progressByTree = new Map((treeProgressResult.data ?? []).map((row) => [row.tree_key, Number(row.total_points)]))
-      const readyUnlocked = (talentsResult.data ?? []).filter((talent) => {
-        if (!talent.supreme_unlocked || talent.is_hidden) return false
-        const individualRequirements = (prerequisitesResult.data ?? []).filter((item) => item.talent_id === talent.id)
-        const treeRequirements = (treeRequirementsResult.data ?? []).filter((item) => item.talent_id === talent.id)
-        return individualRequirements.every((item) => (progressByTalent.get(item.prerequisite_talent_id) ?? 0) >= Number(item.required_points))
-          && treeRequirements.every((item) => (progressByTree.get(item.required_tree_key) ?? 0) >= Number(item.required_points))
-      })
+      // refresh_automatic_compendium_unlocks is already invoked transactionally
+      // by the talent_progress trigger. Read the resulting authoritative state
+      // in one request instead of recomputing all prerequisites in the browser.
+      const { data, error } = await supabase
+        .from('talents_safe')
+        .select('id, name')
+        .eq('tree_key', 'supremo')
+        .eq('is_supreme', true)
+        .eq('supreme_unlocked', true)
+        .eq('is_hidden', false)
 
+      if (cancelled) return
+      if (error) {
+        console.error('Erro ao consultar desbloqueios supremos:', error.message)
+        if (isInitialLoadForUser) setSupremeUnlocksReady(true)
+        return
+      }
+
+      const readyUnlocked = data ?? []
+      const unlockedIds = readyUnlocked.map((item) => item.id).sort()
+      setUnlockedSupremeTalentIds(unlockedIds)
+      supremeUnlocksLoadedForUser.current = userId
+      setSupremeUnlocksReady(true)
       const storageKey = `raziel:seen-supreme-unlocks:${userId}`
       let persisted: string[] = []
-      try { persisted = JSON.parse(window.localStorage.getItem(storageKey) ?? '[]') as string[] } catch { persisted = [] }
+      try {
+        persisted = JSON.parse(window.localStorage.getItem(storageKey) ?? '[]') as string[]
+      } catch {
+        persisted = []
+      }
+
       const seen = new Set([...persisted, ...seenSupremeUnlocks.current])
       setSupremeAvailableCount(readyUnlocked.length)
+
       if (!supremeUnlocksInitialized.current) {
         readyUnlocked.forEach((item) => seen.add(item.id))
         supremeUnlocksInitialized.current = true
       } else {
         const newlyUnlocked = readyUnlocked.filter((item) => !seen.has(item.id))
         if (newlyUnlocked.length) {
-          setSupremeUnlockQueue((current) => [...current, ...newlyUnlocked.map((item) => item.name)])
+          setSupremeUnlockQueue((current) => [
+            ...current,
+            ...newlyUnlocked.map((item) => item.name),
+          ])
           newlyUnlocked.forEach((item) => seen.add(item.id))
         }
       }
+
       seenSupremeUnlocks.current = seen
-      try { window.localStorage.setItem(storageKey, JSON.stringify([...seen])) } catch { /* armazenamento indisponível */ }
+      try {
+        window.localStorage.setItem(storageKey, JSON.stringify([...seen]))
+      } catch {
+        /* armazenamento indisponível */
+      }
     }
+
     void checkNewSupremeUnlocks()
     return () => { cancelled = true }
   }, [userId, supremeRefresh, progressRefresh])
@@ -443,6 +479,13 @@ function App() {
     setVisitedPages(new Set<PageKey>(['dashboard']))
     setPendingTalentId(null)
     setLevelUpdateMessage(null)
+    seenSupremeUnlocks.current = new Set()
+    supremeUnlocksInitialized.current = false
+    supremeUnlocksLoadedForUser.current = null
+    setUnlockedSupremeTalentIds([])
+    setSupremeUnlocksReady(false)
+    setSupremeUnlockQueue([])
+    setSupremeUnlockNotice(false)
   }, [userId])
 
   const navigate = useCallback((page: PageKey) => {
@@ -480,6 +523,9 @@ function App() {
     setPendingTalentId(null)
     seenSupremeUnlocks.current = new Set()
     supremeUnlocksInitialized.current = false
+    supremeUnlocksLoadedForUser.current = null
+    setUnlockedSupremeTalentIds([])
+    setSupremeUnlocksReady(false)
     setSupremeUnlockQueue([])
     setSupremeUnlockNotice(false)
     setTotalDistributed(0)
@@ -578,15 +624,28 @@ function App() {
           isAdmin={isAdmin && adminCheckReady}
           totalAvailable={totalAvailable}
           totalDistributed={totalDistributed}
-          refreshKey={supremeRefresh}
+          unlockedSupremeTalentIds={unlockedSupremeTalentIds}
+          accessReady={supremeUnlocksReady}
           focusTalentId={pendingTalentId}
           onFocusTalentHandled={() => setPendingTalentId(null)}
-          onProgressChanged={(_treeId, previousPoints, updatedPoints) => {
+          onProgressChanged={(_treeId, previousPoints, updatedPoints, item) => {
             const difference = updatedPoints - previousPoints
             setTotalDistributed((current) => current + difference)
+            if (item?.kind === 'talent') {
+              setActiveSupremeTalents((current) => {
+                const withoutItem = current.filter((talent) => talent.id !== item.id)
+                return item.points > 0
+                  ? [...withoutItem, { id: item.id, name: item.name, tree_key: 'supremo', points: item.points, is_supreme: true }]
+                  : withoutItem
+              })
+            }
+            setSupremeRefresh((current) => current + 1)
           }}
-          onTalentDeleted={(_treeId, removedPoints, _wasActive) => {
+          onTalentDeleted={(_treeId, removedPoints, _wasActive, talent) => {
             setTotalDistributed((current) => Math.max(0, current - removedPoints))
+            if (talent) {
+              setActiveSupremeTalents((current) => current.filter((item) => item.id !== talent.id))
+            }
             setSupremeRefresh((current) => current + 1)
           }}
         />
@@ -604,62 +663,84 @@ function App() {
           isAdmin={isAdmin && adminCheckReady}
           totalAvailable={totalAvailable}
           totalDistributed={totalDistributed}
+          refreshKey={progressRefresh}
           focusTalentId={pendingTalentId}
           onFocusTalentHandled={() => setPendingTalentId(null)}
-          onProgressChanged={(treeId, previousPoints, updatedPoints) => {
+          onProgressChanged={(treeId, previousPoints, updatedPoints, item) => {
             const difference = updatedPoints - previousPoints
-
             setTotalDistributed((current) => current + difference)
-            setSupremeRefresh((current) => current + 1)
-            setProgressRefresh((current) => current + 1)
+
+            if (item?.kind === 'talent') {
+              const summary = {
+                id: item.id,
+                name: item.name,
+                tree_key: treeId,
+                points: item.points,
+                is_supreme: item.is_supreme,
+              }
+              if (item.is_supreme || treeId === 'supremo') {
+                setActiveSupremeTalents((current) => {
+                  const withoutItem = current.filter((talent) => talent.id !== item.id)
+                  return item.points > 0 ? [...withoutItem, summary] : withoutItem
+                })
+              } else {
+                setActiveTalentsByTree((current) => {
+                  const existing = current[treeId] ?? []
+                  const withoutItem = existing.filter((talent) => talent.id !== item.id)
+                  return {
+                    ...current,
+                    [treeId]: item.points > 0 ? [...withoutItem, summary] : withoutItem,
+                  }
+                })
+              }
+            } else if (item?.kind === 'apex') {
+              setActiveApexTreeKeys((current) =>
+                updatedPoints > 0
+                  ? (current.includes(treeId) ? current : [...current, treeId])
+                  : current.filter((key) => key !== treeId),
+              )
+            }
 
             setTreeProgress((current) => {
-              const currentTree = current[treeId] ?? {
-                points: 0,
-                visible: 0,
-              }
-
-              const becameActive =
-                previousPoints === 0 && updatedPoints > 0
-
-              const becameInactive =
-                previousPoints > 0 && updatedPoints === 0
+              const currentTree = current[treeId] ?? { points: 0, visible: 0 }
+              const isTalentChange = item?.kind === 'talent'
+              const becameActive = isTalentChange && previousPoints === 0 && updatedPoints > 0
+              const becameInactive = isTalentChange && previousPoints > 0 && updatedPoints === 0
 
               return {
                 ...current,
                 [treeId]: {
-                  points: currentTree.points + difference,
-                  visible:
-                    currentTree.visible +
-                    (becameActive ? 1 : 0) -
-                    (becameInactive ? 1 : 0),
+                  points: Math.max(0, currentTree.points + difference),
+                  visible: Math.max(0, currentTree.visible + (becameActive ? 1 : 0) - (becameInactive ? 1 : 0)),
                 },
               }
             })
+
+            // A alteração no banco já recalcula as Supremas pelo trigger.
+            // Esta atualização consulta apenas o estado final para a notificação.
+            setSupremeRefresh((current) => current + 1)
           }}
-          onTalentDeleted={(treeId, removedPoints, wasActive) => {
-            setTotalDistributed((current) =>
-              Math.max(0, current - removedPoints),
-            )
+          onTalentDeleted={(treeId, removedPoints, wasActive, talent) => {
+            setTotalDistributed((current) => Math.max(0, current - removedPoints))
+            if (talent) {
+              if (talent.is_supreme || treeId === 'supremo') {
+                setActiveSupremeTalents((current) => current.filter((item) => item.id !== talent.id))
+              } else {
+                setActiveTalentsByTree((current) => ({
+                  ...current,
+                  [treeId]: (current[treeId] ?? []).filter((item) => item.id !== talent.id),
+                }))
+              }
+            }
             setSupremeRefresh((current) => current + 1)
 
             setTreeProgress((current) => {
-              const currentTree = current[treeId] ?? {
-                points: 0,
-                visible: 0,
-              }
-
+              const currentTree = current[treeId] ?? { points: 0, visible: 0 }
               return {
                 ...current,
                 [treeId]: {
-                  points: Math.max(
-                    0,
-                    currentTree.points - removedPoints,
-                  ),
-                  visible: Math.max(
-                    0,
-                    currentTree.visible - (wasActive ? 1 : 0),
-                  ),
+                  points: Math.max(0, currentTree.points - removedPoints),
+                  visible: Math.max(0, currentTree.visible - (wasActive ? 1 : 0)),
                 },
               }
             })

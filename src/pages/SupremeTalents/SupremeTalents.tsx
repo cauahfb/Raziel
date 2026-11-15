@@ -1,18 +1,18 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Crown, LockKeyhole } from 'lucide-react'
 import type { Tree } from '../../types/tree'
-import { supabase } from '../../lib/supabase'
-import TalentTree from '../TalentTrees/TalentTree'
+import TalentTree, { type DeletedTalentInfo, type ProgressChangeItem } from '../TalentTrees/TalentTree'
 
 type Props = {
   isAdmin: boolean
   totalAvailable: number
   totalDistributed: number
-  refreshKey: number
+  unlockedSupremeTalentIds: string[]
+  accessReady: boolean
   focusTalentId?: string | null
   onFocusTalentHandled?: () => void
-  onProgressChanged: (treeId: string, previousPoints: number, updatedPoints: number) => void
-  onTalentDeleted: (treeId: string, removedPoints: number, wasActive: boolean) => void
+  onProgressChanged: (treeId: string, previousPoints: number, updatedPoints: number, item?: ProgressChangeItem) => void
+  onTalentDeleted: (treeId: string, removedPoints: number, wasActive: boolean, talent?: DeletedTalentInfo) => void
 }
 
 const supremeTree: Tree = {
@@ -25,54 +25,42 @@ const supremeTree: Tree = {
   visible: 0,
 }
 
-export default function SupremeTalents({ isAdmin, totalAvailable, totalDistributed, refreshKey, focusTalentId, onFocusTalentHandled, onProgressChanged, onTalentDeleted }: Props) {
-  const [loading, setLoading] = useState(true)
-  const [hasUnlockedTalents, setHasUnlockedTalents] = useState(false)
-  const [reloadKey, setReloadKey] = useState(0)
+export default function SupremeTalents({
+  isAdmin,
+  totalAvailable,
+  totalDistributed,
+  unlockedSupremeTalentIds,
+  accessReady,
+  focusTalentId,
+  onFocusTalentHandled,
+  onProgressChanged,
+  onTalentDeleted,
+}: Props) {
+  const [treeRefreshKey, setTreeRefreshKey] = useState(0)
+  const previousUnlockedIds = useRef<string[] | null>(null)
 
   useEffect(() => {
-    let cancelled = false
+    if (!accessReady) return
 
-    async function checkSupremeAccess() {
-      setLoading(true)
-      if (!supabase) {
-        setHasUnlockedTalents(false)
-        setLoading(false)
-        return
-      }
+    const nextIds = [...new Set(unlockedSupremeTalentIds)].sort()
+    const previousIds = previousUnlockedIds.current
 
-      // Recalcula a revelação no banco antes de verificar o acesso, garantindo
-      // que supreme_unlocked=true também resulte em is_hidden=false.
-      const { error: refreshError } = await supabase.rpc('refresh_automatic_compendium_unlocks')
-      if (refreshError) {
-        console.error('Erro ao sincronizar a revelação das Habilidades Supremas:', refreshError.message)
-      }
-
-      let query = supabase
-        .from('talents_player_safe')
-        .select('id, is_hidden, supreme_unlocked')
-        .eq('tree_key', 'supremo')
-        .eq('is_supreme', true)
-
-      if (!isAdmin) query = query.eq('supreme_unlocked', true)
-
-      const { data, error } = await query
-
-      if (cancelled) return
-      if (error) {
-        console.error('Erro ao verificar conhecimentos supremos:', error.message)
-        setHasUnlockedTalents(false)
-      } else {
-        setHasUnlockedTalents((data ?? []).length > 0)
-      }
-      setLoading(false)
+    if (
+      previousIds !== null
+      && (
+        previousIds.length !== nextIds.length
+        || previousIds.some((id, index) => id !== nextIds[index])
+      )
+    ) {
+      // Recarrega a árvore somente quando uma Suprema é revelada/ocultada.
+      // A distribuição normal de pontos não desmonta a tela nem mostra loading.
+      setTreeRefreshKey((current) => current + 1)
     }
 
-    void checkSupremeAccess()
-    return () => { cancelled = true }
-  }, [reloadKey, refreshKey, isAdmin])
+    previousUnlockedIds.current = nextIds
+  }, [unlockedSupremeTalentIds, accessReady])
 
-  if (loading) {
+  if (!accessReady) {
     return (
       <section className="tree-feedback supreme-feedback">
         <Crown size={24} className="supreme-loading-icon" />
@@ -81,6 +69,8 @@ export default function SupremeTalents({ isAdmin, totalAvailable, totalDistribut
       </section>
     )
   }
+
+  const hasUnlockedTalents = unlockedSupremeTalentIds.length > 0
 
   if (!hasUnlockedTalents && !isAdmin) {
     return (
@@ -96,19 +86,19 @@ export default function SupremeTalents({ isAdmin, totalAvailable, totalDistribut
 
   return (
     <TalentTree
-      key={`${reloadKey}-${refreshKey}`}
       tree={supremeTree}
+      refreshKey={treeRefreshKey}
       isAdmin={isAdmin}
       totalAvailable={totalAvailable}
       totalDistributed={totalDistributed}
       focusTalentId={focusTalentId}
       onFocusTalentHandled={onFocusTalentHandled}
-      onProgressChanged={(treeId, previousPoints, updatedPoints) => {
-        onProgressChanged(treeId, previousPoints, updatedPoints)
+      onProgressChanged={(treeId, previousPoints, updatedPoints, item) => {
+        onProgressChanged(treeId, previousPoints, updatedPoints, item)
       }}
-      onTalentDeleted={(treeId, removedPoints, wasActive) => {
-        onTalentDeleted(treeId, removedPoints, wasActive)
-        setReloadKey((value) => value + 1)
+      onTalentDeleted={(treeId, removedPoints, wasActive, talent) => {
+        onTalentDeleted(treeId, removedPoints, wasActive, talent)
+        setTreeRefreshKey((value) => value + 1)
       }}
     />
   )
