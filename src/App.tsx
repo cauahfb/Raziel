@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 
 import AppLayout from './components/layout/AppLayout'
-import { POINTS_PER_LEVEL, trees } from './data/trees'
+import { trees } from './data/trees'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 
 import Dashboard from './pages/Dashboard/Dashboard'
@@ -11,9 +11,10 @@ import Login from './pages/Login/Login'
 import SupremeTalents from './pages/SupremeTalents/SupremeTalents'
 import TalentTree from './pages/TalentTrees/TalentTree'
 
-import AdminPlaceholder from './pages/admin/AdminPlaceholder'
 import TalentManagement from './pages/admin/TalentManagement'
 import ResetProgress from './pages/admin/ResetProgress'
+import AdminHistory from './pages/admin/AdminHistory'
+import AdminBackup from './pages/admin/AdminBackup'
 
 import type { PageKey, Tree } from './types/tree'
 
@@ -168,7 +169,7 @@ function App() {
 
       const client = supabase
 
-      const [levelResult, treeProgressResult, talentsResult, talentProgressResult] = await Promise.all([
+      const [levelResult, treeProgressResult, talentsResult, talentProgressResult, apexProgressResult] = await Promise.all([
         client
           .from('compendium_progress')
           .select('character_level')
@@ -182,6 +183,7 @@ function App() {
           ),
         client.from('talents_safe').select('id, tree_key, name, is_supreme, is_hidden'),
         client.from('talent_progress_safe').select('talent_id, points'),
+        client.from('talent_tree_apices_safe').select('tree_key, current_points'),
       ])
 
       if (cancelled) return
@@ -212,8 +214,8 @@ function App() {
         return
       }
 
-      if (talentsResult.error || talentProgressResult.error) {
-        console.error('Erro ao carregar talentos ativos do Dashboard:', talentsResult.error?.message ?? talentProgressResult.error?.message)
+      if (talentsResult.error || talentProgressResult.error || apexProgressResult.error) {
+        console.error('Erro ao carregar talentos ativos do Dashboard:', talentsResult.error?.message ?? talentProgressResult.error?.message ?? apexProgressResult.error?.message)
         setProgressError('Não foi possível carregar os talentos ativos do Dashboard.')
         setProgressReady(true)
         return
@@ -282,6 +284,13 @@ function App() {
         if (talent.is_supreme || talent.tree_key === 'supremo') activeSupremes.push(item)
         else (activeByTree[talent.tree_key] ??= []).push(item)
       }
+      for (const apex of apexProgressResult.data ?? []) {
+        const points = Number(apex.current_points) || 0
+        distributed += points
+        const target = nextTreeProgress[apex.tree_key]
+        if (target) target.points += points
+      }
+
       setActiveTalentsByTree(activeByTree)
       setActiveSupremeTalents(activeSupremes)
 
@@ -333,7 +342,10 @@ function App() {
     [treeProgress],
   )
 
-  const totalPoints = characterLevel * POINTS_PER_LEVEL
+  // 3 pontos por nível do 1 ao 20; 5 pontos por nível a partir do 21.
+  const totalPoints =
+    Math.min(characterLevel, 20) * 3 +
+    Math.max(characterLevel - 20, 0) * 5
 
   const totalAvailable = Math.max(
     totalPoints - totalDistributed,
@@ -472,25 +484,13 @@ function App() {
         return <TalentManagement />
 
       case 'history':
-        return (
-          <AdminPlaceholder
-            title="Histórico Administrativo"
-            description="O registro das alterações administrativas será apresentado aqui."
-            status="HISTÓRICO EM PREPARAÇÃO"
-          />
-        )
+        return <AdminHistory />
 
       case 'reset':
         return <ResetProgress onResetComplete={() => { setProgressRefresh((value) => value + 1); setSupremeRefresh((value) => value + 1) }} />
 
       case 'backup':
-        return (
-          <AdminPlaceholder
-            title="Backup"
-            description="As opções de exportação e restauração do Compendium serão apresentadas aqui."
-            status="BACKUP EM PREPARAÇÃO"
-          />
-        )
+        return <AdminBackup />
 
       default:
         return null

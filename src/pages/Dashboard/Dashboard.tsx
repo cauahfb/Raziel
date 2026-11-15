@@ -4,7 +4,6 @@ import {
   Activity,
   ArrowUpRight,
   Crown,
-  RotateCcw,
   Compass,
   Sparkles,
   X,
@@ -118,7 +117,10 @@ export default function Dashboard({
   const totalActiveTalents = Object.values(activeTalentsByTree).reduce((sum, items) => sum + items.length, 0) + activeSupremeTalents.length
   const totalSupremePoints = activeSupremeTalents.reduce((sum, talent) => sum + talent.points, 0)
 
-  const totalPoints = characterLevel * 3
+  // Mantém o total exibido no Dashboard igual ao cálculo central do App.
+  const totalPoints =
+    Math.min(characterLevel, 20) * 3 +
+    Math.max(characterLevel - 20, 0) * 5
 
   const progress =
     totalPoints > 0
@@ -399,13 +401,6 @@ export default function Dashboard({
               </button>
             ))}
           </div>
-        </section>
-      )}
-
-      {isAdmin && (
-        <section className="dashboard-admin-reset-shortcut">
-          <div><strong>Administração da progressão</strong><span>Redefina todos os pontos distribuídos globalmente.</span></div>
-          <button type="button" onClick={() => onNavigate('reset')}><RotateCcw size={15} /> Área de reset</button>
         </section>
       )}
 

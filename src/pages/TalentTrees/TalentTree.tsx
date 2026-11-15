@@ -14,6 +14,7 @@ import {
   Search,
   Trash2,
   Sparkles,
+  Crown,
   X,
 } from 'lucide-react'
 
@@ -88,6 +89,17 @@ type DependentTalent = {
 type TalentProgress = {
   talent_id: string
   points: number
+}
+
+type TreeApex = {
+  tree_key: string
+  name: string
+  icon_url: string | null
+  required_points: number
+  description: string | null
+  is_available: boolean
+  is_revealed: boolean
+  current_points: number
 }
 
 type TalentTreeProps = {
@@ -209,6 +221,11 @@ export default function TalentTree({
   const [reloadKey, setReloadKey] = useState(0)
   const [updatingTalentId, setUpdatingTalentId] = useState<string | null>(null)
   const [progressMessage, setProgressMessage] = useState<string | null>(null)
+  const [apex, setApex] = useState<TreeApex | null>(null)
+  const [apexEditorOpen, setApexEditorOpen] = useState(false)
+  const [apexDetailsOpen, setApexDetailsOpen] = useState(false)
+  const [apexSaving, setApexSaving] = useState(false)
+  const [apexForm, setApexForm] = useState({ name: '', icon_url: '', required_points: 0, description: '', is_revealed: false })
 
   const [modalOpen, setModalOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -263,19 +280,13 @@ export default function TalentTree({
         'current_points'
       >[]
 
-      if (loadedTalents.length === 0) {
-        setTalents([])
-        setTreeDistributed(0)
-        setLoading(false)
-        return
-      }
-
       const talentIds = loadedTalents.map((talent) => talent.id)
 
       const [
         prerequisiteResult,
         treeRequirementResult,
         progressResult,
+        apexResult,
       ] = await Promise.all([
         supabase
           .from('talent_prerequisites_safe')
@@ -291,6 +302,7 @@ export default function TalentTree({
           .from('talent_progress_safe')
           .select('talent_id, points')
           .in('talent_id', talentIds),
+        supabase.from('talent_tree_apices_safe').select('*').eq('tree_key', tree.id).maybeSingle(),
       ])
 
       if (cancelled) return
@@ -317,6 +329,19 @@ export default function TalentTree({
         )
         setLoading(false)
         return
+      }
+
+      if (apexResult.error) {
+        console.error('Erro ao carregar o Ápice:', apexResult.error.message)
+        setError('Não foi possível carregar o Ápice desta árvore. Execute a migração de Ápices no Supabase.')
+        setLoading(false)
+        return
+      }
+
+      const loadedApex = apexResult.data as TreeApex | null
+      setApex(loadedApex)
+      if (loadedApex) {
+        setApexForm({ name: loadedApex.name === '???' ? '' : loadedApex.name, icon_url: loadedApex.icon_url ?? '', required_points: Number(loadedApex.required_points), description: loadedApex.description ?? '', is_revealed: loadedApex.is_revealed })
       }
 
       if (progressResult.error) {
@@ -373,7 +398,7 @@ export default function TalentTree({
       )
 
       setTalents(talentsWithPrerequisites)
-      setTreeDistributed(distributedInTree)
+      setTreeDistributed(distributedInTree + Number(loadedApex?.current_points ?? 0))
       setLoading(false)
     }
 
@@ -488,8 +513,38 @@ export default function TalentTree({
     )
 
     onProgressChanged(tree.id, previousPoints, updatedPoints)
+    setReloadKey((current) => current + 1)
 
     setUpdatingTalentId(null)
+  }
+
+  async function changeApexPoints(delta: 1 | -1) {
+    if (!supabase || !apex || updatingTalentId) return
+    if (delta === 1 && totalAvailable <= 0) { setProgressMessage('Não há pontos disponíveis para distribuir.'); return }
+    setUpdatingTalentId('apex')
+    const { data, error } = await supabase.rpc('change_talent_tree_apex_points', { p_tree_key: tree.id, p_delta: delta })
+    if (error) { setProgressMessage(error.message || 'Não foi possível alterar os pontos do Ápice.'); setUpdatingTalentId(null); return }
+    const updated = Number(data)
+    setApex((current) => current ? { ...current, current_points: updated } : current)
+    setTreeDistributed((current) => current + delta)
+    onProgressChanged(tree.id, delta === 1 ? 0 : 1, updated)
+    setUpdatingTalentId(null)
+  }
+
+  async function saveApex() {
+    if (!supabase || !isAdmin || !apex) return
+    if (!apexForm.name.trim()) { setProgressMessage('Informe um nome para o Ápice.'); return }
+    if (!Number.isInteger(apexForm.required_points) || apexForm.required_points < 0) { setProgressMessage('A quantidade de pontos deve ser um inteiro igual ou maior que zero.'); return }
+    setApexSaving(true)
+    const { error } = await supabase.from('talent_tree_apices').upsert({
+      tree_key: tree.id, name: apexForm.name.trim(), icon_url: apexForm.icon_url.trim() || null,
+      required_points: apexForm.required_points, description: apexForm.description.trim(), is_revealed: apexForm.is_revealed,
+    }, { onConflict: 'tree_key' })
+    if (error) { setProgressMessage(error.message || 'Não foi possível salvar o Ápice.'); setApexSaving(false); return }
+    const { data } = await supabase.from('talent_tree_apices_safe').select('*').eq('tree_key', tree.id).maybeSingle()
+    setApex(data as TreeApex | null)
+    setApexSaving(false)
+    setApexEditorOpen(false)
   }
 
   const allAvailableTalentsForPrereq = talents.map((t) => ({
@@ -1139,7 +1194,7 @@ export default function TalentTree({
         </div>
       </section>
 
-      <section className="tree-summary">
+      <section className={`tree-summary${tree.id === 'supremo' ? ' supreme-tree-apex' : ''}`}>
         <div>
           <span>PONTOS DISPONÍVEIS</span>
           <strong>{totalAvailable}</strong>
@@ -1150,10 +1205,55 @@ export default function TalentTree({
           <strong>{treeDistributed}</strong>
         </div>
 
-        <div className="summary-note">
-          3 pontos são concedidos a cada nível.
-        </div>
+        {apex && (
+          <div className="tree-apex-summary" style={{ marginLeft: 'auto' }}>
+            <button type="button" className="tree-apex-main" onClick={() => apex.is_available ? setApexDetailsOpen(true) : undefined} disabled={!apex.is_available}>
+              <span className="tree-apex-emblem">{apex.is_available && apex.icon_url ? <img src={apex.icon_url} alt="" /> : <Crown size={23} />}</span>
+              <span className="tree-apex-copy">
+                <small>ÁPICE</small>
+                <strong>{apex.is_available || isAdmin ? apex.name : 'Ápice: ???'}</strong>
+                <em>{apex.is_available ? `${apex.current_points}/1 ponto distribuído` : tree.id === 'supremo' ? 'Desbloqueie todas as combinações ocultas nessa árvore e ative simultaneamente para descobrir o ápice dela' : `Gaste ${apex.required_points} pontos nessa árvore para descobrir o ápice dela`}</em>
+              </span>
+            </button>
+            {(apex.is_available || apex.current_points > 0) && (
+              <div className="tree-apex-controls">
+                <button type="button" aria-label="Remover ponto do Ápice" disabled={apex.current_points <= 0 || updatingTalentId !== null} onClick={() => void changeApexPoints(-1)}><Minus size={15}/></button>
+                {apex.is_available && <button type="button" aria-label="Adicionar ponto ao Ápice" disabled={apex.current_points >= 1 || totalAvailable <= 0 || updatingTalentId !== null} onClick={() => void changeApexPoints(1)}><Plus size={15}/></button>}
+              </div>
+            )}
+            {isAdmin && <button type="button" className="tree-apex-edit" aria-label="Editar Ápice" onClick={() => setApexEditorOpen(true)}><Pencil size={15}/></button>}
+          </div>
+        )}
       </section>
+
+      {apexDetailsOpen && apex?.is_available && (
+        <div className="talent-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setApexDetailsOpen(false) }}>
+          <section className="talent-modal tree-apex-modal" role="dialog" aria-modal="true" aria-labelledby="apex-details-title">
+            <button type="button" className="talent-modal-close" onClick={() => setApexDetailsOpen(false)}><X size={18}/></button>
+            <div className="tree-apex-modal-icon">{apex.icon_url ? <img src={apex.icon_url} alt=""/> : <Crown size={30}/>}</div>
+            <div className="eyebrow">ÁPICE DA ÁRVORE</div>
+            <h2 id="apex-details-title">{apex.name}</h2>
+            <div className="talent-modal-section"><h3>Detalhes</h3><p>{apex.description || 'Nenhuma descrição foi cadastrada para este Ápice.'}</p></div>
+            <div className="tree-apex-level">Nível {apex.current_points}/1</div>
+          </section>
+        </div>
+      )}
+
+      {apexEditorOpen && isAdmin && apex && (
+        <div className="talent-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !apexSaving) setApexEditorOpen(false) }}>
+          <section className="talent-modal tree-apex-editor" role="dialog" aria-modal="true" aria-labelledby="apex-editor-title">
+            <button type="button" className="talent-modal-close" onClick={() => setApexEditorOpen(false)} disabled={apexSaving}><X size={18}/></button>
+            <div className="eyebrow">CONFIGURAÇÃO ADMINISTRATIVA</div>
+            <h2 id="apex-editor-title">Editar Ápice</h2>
+            <label>Nome<input value={apexForm.name} onChange={(e) => setApexForm(v => ({...v, name:e.target.value}))} placeholder="Nome do Ápice"/></label>
+            <label>URL da imagem<input value={apexForm.icon_url} onChange={(e) => setApexForm(v => ({...v, icon_url:e.target.value}))} placeholder="https://..."/></label>
+            <label>Pontos necessários nesta árvore<input type="number" min={0} step={1} value={apexForm.required_points} onChange={(e) => setApexForm(v => ({...v, required_points:Math.max(0, Number(e.target.value) || 0)}))}/></label>
+            <label>Descrição / detalhes<textarea rows={5} value={apexForm.description} onChange={(e) => setApexForm(v => ({...v, description:e.target.value}))} placeholder="Descreva o efeito do Ápice..."/></label>
+            <label className="tree-apex-reveal-toggle"><input type="checkbox" checked={apexForm.is_revealed} onChange={(e) => setApexForm(v => ({...v, is_revealed:e.target.checked}))}/> Revelar Ápice para os jogadores</label>
+            <div className="talent-modal-actions"><button type="button" onClick={() => setApexEditorOpen(false)} disabled={apexSaving}>Cancelar</button><button type="button" onClick={() => void saveApex()} disabled={apexSaving}>{apexSaving ? 'Salvando...' : 'Salvar Ápice'}</button></div>
+          </section>
+        </div>
+      )}
 
       {progressMessage && (
         <div
