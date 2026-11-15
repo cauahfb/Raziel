@@ -4250,3 +4250,255 @@ section.tree-summary.supreme-tree-apex > div.tree-apex-summary {
   }
 }
 
+
+/* Acabamento dourado do CONTAINER inteiro do Ápice Supremo desbloqueado.
+   Escopo restrito ao resumo da árvore suprema; não afeta os demais Ápices. */
+.supreme-tree-apex .tree-apex-summary.tree-apex-unlocked-gold {
+  border: 1px solid rgba(205, 166, 91, .88) !important;
+  border-right: 1px solid rgba(205, 166, 91, .88) !important;
+  background:
+    linear-gradient(135deg, rgba(111, 79, 37, .2), rgba(65, 48, 34, .12)),
+    linear-gradient(135deg, #211b20 0%, #2b211f 52%, #241d20 100%) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 231, 179, .12),
+    inset 0 0 22px rgba(205, 166, 91, .055),
+    0 0 0 1px rgba(205, 166, 91, .16),
+    0 5px 20px rgba(0, 0, 0, .22),
+    0 0 20px rgba(205, 166, 91, .09) !important;
+}
+
+.supreme-tree-apex .tree-apex-unlocked-gold .tree-apex-edit {
+  border-color: rgba(205, 166, 91, .72) !important;
+  background: linear-gradient(145deg, rgba(112, 81, 42, .38), rgba(55, 43, 35, .58)) !important;
+  color: #e7c77e !important;
+  box-shadow: inset 0 1px 0 rgba(255, 231, 179, .08), 0 0 10px rgba(205, 166, 91, .08);
+}
+
+.supreme-tree-apex .tree-apex-unlocked-gold .tree-apex-edit:hover {
+  border-color: rgba(239, 207, 139, .95) !important;
+  background: linear-gradient(145deg, rgba(145, 105, 49, .48), rgba(75, 56, 37, .68)) !important;
+  color: #fff0c7 !important;
+}
+
+
+/* Ápice Supremo desbloqueado — moldura externa removida,
+   substituída por ornamentos lineares discretos em dourado. */
+.supreme-tree-apex .tree-apex-summary.tree-apex-unlocked-gold {
+  position: relative;
+  isolation: isolate;
+  border: 0 !important;
+  border-right: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 12px 10px !important;
+}
+
+.supreme-tree-apex .tree-apex-summary.tree-apex-unlocked-gold::before,
+.supreme-tree-apex .tree-apex-summary.tree-apex-unlocked-gold::after {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  height: 1px;
+  content: "";
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(185, 139, 65, .12) 8%,
+    rgba(210, 174, 105, .62) 28%,
+    rgba(247, 222, 165, .9) 50%,
+    rgba(210, 174, 105, .62) 72%,
+    rgba(185, 139, 65, .12) 92%,
+    transparent 100%
+  );
+  filter: drop-shadow(0 0 4px rgba(218, 179, 105, .3));
+}
+
+.supreme-tree-apex .tree-apex-summary.tree-apex-unlocked-gold::before {
+  top: 2px;
+}
+
+.supreme-tree-apex .tree-apex-summary.tree-apex-unlocked-gold::after {
+  bottom: 2px;
+  opacity: .65;
+}
+
+.supreme-tree-apex .tree-apex-summary.tree-apex-unlocked-gold .tree-apex-main {
+  border: 1px solid rgba(220, 184, 112, .9) !important;
+  border-radius: 8px !important;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(255, 226, 163, .15), transparent 68%),
+    linear-gradient(135deg, #3a2b25 0%, #30242a 54%, #29202a 100%) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 237, 195, .2),
+    inset 0 0 18px rgba(220, 177, 94, .08),
+    0 0 0 1px rgba(220, 184, 112, .12),
+    0 5px 18px rgba(0, 0, 0, .22),
+    0 0 17px rgba(209, 164, 82, .12) !important;
+}
+
+.supreme-tree-apex .tree-apex-summary.tree-apex-unlocked-gold .tree-apex-edit {
+  border: 1px solid rgba(205, 166, 91, .68) !important;
+  background: linear-gradient(145deg, rgba(112, 81, 42, .3), rgba(55, 43, 35, .42)) !important;
+  color: #e7c77e !important;
+  box-shadow: inset 0 1px 0 rgba(255, 231, 179, .08), 0 0 10px rgba(205, 166, 91, .08);
+}
+
+.supreme-tree-apex .tree-apex-summary.tree-apex-unlocked-gold .tree-apex-edit:hover {
+  border-color: rgba(239, 207, 139, .95) !important;
+  background: linear-gradient(145deg, rgba(145, 105, 49, .42), rgba(75, 56, 37, .58)) !important;
+  color: #fff0c7 !important;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .supreme-tree-apex .tree-apex-summary.tree-apex-unlocked-gold .tree-apex-main {
+    transition: border-color .25s ease, box-shadow .25s ease, background .25s ease;
+  }
+  .supreme-tree-apex .tree-apex-summary.tree-apex-unlocked-gold .tree-apex-main:hover {
+    border-color: rgba(255, 224, 158, .98) !important;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 245, 218, .24),
+      0 0 0 1px rgba(232, 192, 111, .2),
+      0 7px 24px rgba(0, 0, 0, .28),
+      0 0 24px rgba(218, 174, 91, .2) !important;
+  }
+}
+
+
+/* =========================================
+   RAZIEL — MODAL DE DETALHES DO ÁPICE SUPREMO
+   Tema Absolute Power. Escopo exclusivo deste modal.
+========================================= */
+.tree-apex-supreme-details-backdrop {
+  background:
+    radial-gradient(ellipse at 50% 42%, rgba(179, 133, 62, .2), rgba(17, 15, 22, .88) 68%),
+    rgba(7, 8, 14, .88) !important;
+  backdrop-filter: blur(10px) saturate(1.12);
+}
+
+.tree-apex-modal.tree-apex-details-supreme {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border: 1px solid rgba(211, 174, 104, .78) !important;
+  border-radius: 15px !important;
+  color: #f2e4c5 !important;
+  background:
+    radial-gradient(ellipse at 50% -8%, rgba(194, 145, 66, .2), transparent 54%),
+    radial-gradient(ellipse at 50% 110%, rgba(118, 78, 40, .13), transparent 58%),
+    linear-gradient(155deg, #211b20 0%, #1b171d 52%, #15151d 100%) !important;
+  box-shadow:
+    0 0 0 1px rgba(211, 174, 104, .16),
+    0 0 28px rgba(198, 151, 73, .16),
+    0 24px 75px rgba(0, 0, 0, .58),
+    inset 0 1px 0 rgba(255, 235, 190, .12) !important;
+  animation: absolutePowerDetailsAppear .55s cubic-bezier(.2, .8, .2, 1) both;
+}
+
+.tree-apex-modal.tree-apex-details-supreme::before {
+  position: absolute;
+  inset: 9px;
+  z-index: -1;
+  content: "";
+  border: 1px solid rgba(211, 174, 104, .2);
+  border-radius: 9px;
+  pointer-events: none;
+}
+
+.tree-apex-modal.tree-apex-details-supreme::after {
+  position: absolute;
+  top: 0;
+  left: 12%;
+  width: 76%;
+  height: 1px;
+  content: "";
+  background: linear-gradient(90deg, transparent, rgba(255, 239, 199, .9), rgba(215, 174, 99, .9), transparent);
+  box-shadow: 0 0 15px 3px rgba(224, 181, 102, .25);
+  pointer-events: none;
+}
+
+.tree-apex-modal.tree-apex-details-supreme .talent-modal-close {
+  z-index: 2;
+  border: 1px solid rgba(211, 174, 104, .58) !important;
+  border-radius: 7px !important;
+  color: #e8cb8d !important;
+  background: linear-gradient(145deg, rgba(116, 82, 42, .3), rgba(41, 33, 34, .58)) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 235, 190, .08), 0 0 12px rgba(198, 151, 73, .08);
+}
+
+.tree-apex-modal.tree-apex-details-supreme .talent-modal-close:hover {
+  border-color: rgba(255, 225, 160, .95) !important;
+  color: #fff1cf !important;
+  background: rgba(145, 105, 49, .38) !important;
+  box-shadow: 0 0 16px rgba(218, 174, 91, .2);
+}
+
+.tree-apex-modal.tree-apex-details-supreme .tree-apex-modal-icon {
+  border: 1px solid rgba(231, 195, 123, .9) !important;
+  color: #f0d18f !important;
+  background:
+    radial-gradient(circle at 50% 35%, rgba(255, 239, 197, .3), transparent 48%),
+    linear-gradient(145deg, #71552f 0%, #3d3030 56%, #29232c 100%) !important;
+  box-shadow:
+    0 0 0 6px rgba(208, 166, 88, .07),
+    0 0 24px rgba(220, 177, 96, .24),
+    inset 0 1px 0 rgba(255, 242, 208, .2) !important;
+}
+
+.tree-apex-modal.tree-apex-details-supreme .tree-apex-modal-icon svg {
+  color: #f5dda8;
+  filter: drop-shadow(0 0 7px rgba(255, 224, 157, .55));
+}
+
+.tree-apex-modal.tree-apex-details-supreme .eyebrow {
+  color: #d8b66f !important;
+  letter-spacing: .28em;
+  text-shadow: 0 0 12px rgba(219, 176, 94, .2);
+}
+
+.tree-apex-modal.tree-apex-details-supreme h2 {
+  color: #f5e4bd !important;
+  text-shadow:
+    0 2px 5px rgba(0, 0, 0, .45),
+    0 0 24px rgba(225, 184, 105, .2);
+}
+
+.tree-apex-modal.tree-apex-details-supreme .talent-modal-section {
+  position: relative;
+  border: 1px solid rgba(194, 154, 86, .42) !important;
+  border-radius: 9px !important;
+  background:
+    linear-gradient(135deg, rgba(118, 85, 43, .14), rgba(40, 33, 37, .52)),
+    rgba(23, 21, 27, .9) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 232, 183, .07),
+    inset 0 0 22px rgba(205, 166, 91, .035),
+    0 5px 18px rgba(0, 0, 0, .16);
+}
+
+.tree-apex-modal.tree-apex-details-supreme .talent-modal-section h3 {
+  color: #d8b66f !important;
+  letter-spacing: .12em;
+}
+
+.tree-apex-modal.tree-apex-details-supreme .talent-modal-section p {
+  color: #e0d2b8 !important;
+}
+
+.tree-apex-modal.tree-apex-details-supreme .tree-apex-level {
+  color: #d8b66f !important;
+  text-shadow: 0 0 12px rgba(219, 176, 94, .22);
+}
+
+@keyframes absolutePowerDetailsAppear {
+  from { opacity: 0; transform: translateY(12px) scale(.975); filter: brightness(.8); }
+  to { opacity: 1; transform: translateY(0) scale(1); filter: brightness(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tree-apex-modal.tree-apex-details-supreme {
+    animation: none !important;
+  }
+}
+

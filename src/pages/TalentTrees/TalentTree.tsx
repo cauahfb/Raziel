@@ -1517,8 +1517,8 @@ export default function TalentTree({
       )}
 
       {apexDetailsOpen && apex && !apex.is_hidden && (
-        <div className="talent-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setApexDetailsOpen(false) }}>
-          <section className="talent-modal tree-apex-modal" role="dialog" aria-modal="true" aria-labelledby="apex-details-title">
+        <div className={`talent-modal-backdrop${tree.id === 'supremo' ? ' tree-apex-supreme-details-backdrop' : ''}`} onMouseDown={(event) => { if (event.target === event.currentTarget) setApexDetailsOpen(false) }}>
+          <section className={`talent-modal tree-apex-modal${tree.id === 'supremo' ? ' tree-apex-details-supreme' : ''}`} role="dialog" aria-modal="true" aria-labelledby="apex-details-title">
             <button type="button" className="talent-modal-close" onClick={() => setApexDetailsOpen(false)}><X size={18}/></button>
             <div className="tree-apex-modal-icon">{apex.icon_url ? <img src={apex.icon_url} alt=""/> : <Crown size={30}/>}</div>
             <div className="eyebrow">ÁPICE DA ÁRVORE</div>
