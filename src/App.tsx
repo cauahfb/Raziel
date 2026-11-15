@@ -1,5 +1,5 @@
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 
 import AppLayout from './components/layout/AppLayout'
@@ -53,8 +53,13 @@ function App() {
   const [progressReady, setProgressReady] = useState(false)
   const [progressError, setProgressError] = useState<string | null>(null)
   const [progressRefresh, setProgressRefresh] = useState(0)
-  const [supremeAvailableCount, setSupremeAvailableCount] = useState(0)
   const [supremeRefresh, setSupremeRefresh] = useState(0)
+  const [supremeAvailableCount, setSupremeAvailableCount] = useState(0)
+  const [supremeUnlockNotice, setSupremeUnlockNotice] = useState(false)
+  const [supremeUnlockNoticeName, setSupremeUnlockNoticeName] = useState('')
+  const [supremeUnlockQueue, setSupremeUnlockQueue] = useState<string[]>([])
+  const seenSupremeUnlocks = useRef<Set<string>>(new Set())
+  const supremeUnlocksInitialized = useRef(false)
 
   const [isUpdatingLevel, setIsUpdatingLevel] = useState(false)
   const [levelUpdateMessage, setLevelUpdateMessage] = useState<string | null>(
@@ -309,28 +314,60 @@ function App() {
 
   useEffect(() => {
     let cancelled = false
-
-    async function loadSupremeCount() {
-      if (!userId || !supabase) {
-        setSupremeAvailableCount(0)
-        return
-      }
-
-      const { data, error } = await supabase.rpc('get_available_supreme_talents_count')
+    async function checkNewSupremeUnlocks() {
+      if (!userId || !supabase) return
+      const [talentsResult, prerequisitesResult, treeRequirementsResult, progressResult, treeProgressResult] = await Promise.all([
+        supabase.from('talents_safe').select('id, name, is_hidden, supreme_unlocked').eq('tree_key', 'supremo').eq('is_supreme', true),
+        supabase.from('talent_prerequisites_safe').select('talent_id, prerequisite_talent_id, required_points'),
+        supabase.from('talent_tree_requirements_safe').select('talent_id, required_tree_key, required_points'),
+        supabase.from('talent_progress_safe').select('talent_id, points'),
+        supabase.from('talent_tree_progress_safe').select('tree_key, total_points'),
+      ])
       if (cancelled) return
-
-      if (error) {
-        console.error('Erro ao consultar talentos supremos disponíveis:', error.message)
-        setSupremeAvailableCount(0)
+      const firstError = talentsResult.error || prerequisitesResult.error || treeRequirementsResult.error || progressResult.error || treeProgressResult.error
+      if (firstError) {
+        console.error('Erro ao consultar desbloqueios supremos:', firstError.message)
         return
       }
 
-      setSupremeAvailableCount(Number(data) || 0)
-    }
+      const progressByTalent = new Map((progressResult.data ?? []).map((row) => [row.talent_id, Number(row.points)]))
+      const progressByTree = new Map((treeProgressResult.data ?? []).map((row) => [row.tree_key, Number(row.total_points)]))
+      const readyUnlocked = (talentsResult.data ?? []).filter((talent) => {
+        if (!talent.supreme_unlocked || talent.is_hidden) return false
+        const individualRequirements = (prerequisitesResult.data ?? []).filter((item) => item.talent_id === talent.id)
+        const treeRequirements = (treeRequirementsResult.data ?? []).filter((item) => item.talent_id === talent.id)
+        return individualRequirements.every((item) => (progressByTalent.get(item.prerequisite_talent_id) ?? 0) >= Number(item.required_points))
+          && treeRequirements.every((item) => (progressByTree.get(item.required_tree_key) ?? 0) >= Number(item.required_points))
+      })
 
-    void loadSupremeCount()
+      const storageKey = `raziel:seen-supreme-unlocks:${userId}`
+      let persisted: string[] = []
+      try { persisted = JSON.parse(window.localStorage.getItem(storageKey) ?? '[]') as string[] } catch { persisted = [] }
+      const seen = new Set([...persisted, ...seenSupremeUnlocks.current])
+      setSupremeAvailableCount(readyUnlocked.length)
+      if (!supremeUnlocksInitialized.current) {
+        readyUnlocked.forEach((item) => seen.add(item.id))
+        supremeUnlocksInitialized.current = true
+      } else {
+        const newlyUnlocked = readyUnlocked.filter((item) => !seen.has(item.id))
+        if (newlyUnlocked.length) {
+          setSupremeUnlockQueue((current) => [...current, ...newlyUnlocked.map((item) => item.name)])
+          newlyUnlocked.forEach((item) => seen.add(item.id))
+        }
+      }
+      seenSupremeUnlocks.current = seen
+      try { window.localStorage.setItem(storageKey, JSON.stringify([...seen])) } catch { /* armazenamento indisponível */ }
+    }
+    void checkNewSupremeUnlocks()
     return () => { cancelled = true }
   }, [userId, supremeRefresh, progressRefresh])
+
+  useEffect(() => {
+    if (supremeUnlockNotice || supremeUnlockQueue.length === 0) return
+    setSupremeUnlockNoticeName(supremeUnlockQueue[0])
+    setSupremeUnlockQueue((current) => current.slice(1))
+    setSupremeUnlockNotice(true)
+  }, [supremeUnlockNotice, supremeUnlockQueue])
 
   const treesWithProgress: Tree[] = useMemo(
     () =>
@@ -434,8 +471,12 @@ function App() {
     setTreeProgress({})
     setActiveTalentsByTree({})
     setActiveSupremeTalents([])
-    setPendingTalentId(null)
     setSupremeAvailableCount(0)
+    setPendingTalentId(null)
+    seenSupremeUnlocks.current = new Set()
+    supremeUnlocksInitialized.current = false
+    setSupremeUnlockQueue([])
+    setSupremeUnlockNotice(false)
     setTotalDistributed(0)
     setLevelUpdateMessage(null)
   }
@@ -537,7 +578,6 @@ function App() {
           onProgressChanged={(_treeId, previousPoints, updatedPoints) => {
             const difference = updatedPoints - previousPoints
             setTotalDistributed((current) => current + difference)
-            setSupremeRefresh((current) => current + 1)
           }}
           onTalentDeleted={(_treeId, removedPoints, _wasActive) => {
             setTotalDistributed((current) => Math.max(0, current - removedPoints))
@@ -707,6 +747,20 @@ function App() {
           {renderPage(page)}
         </div>
       ))}
+      {supremeUnlockNotice && (
+        <div className="talent-modal-backdrop supreme-talent-notice-backdrop" role="presentation">
+          <section className="talent-modal supreme-talent-notice" role="dialog" aria-modal="true" aria-labelledby="supreme-unlock-notice-title">
+            <div className="supreme-notice-ornament" aria-hidden="true"><span>✦</span></div>
+            <div className="supreme-notice-eyebrow">UM NOVO PODER DESPERTA</div>
+            <h2 id="supreme-unlock-notice-title">Você atingiu um novo patamar supremo</h2>
+            <div className="supreme-notice-divider" aria-hidden="true"><span>✧</span></div>
+            <p className="supreme-notice-talent-name">{supremeUnlockNoticeName}</p>
+            <p className="supreme-notice-description">Uma nova habilidade suprema foi desbloqueada. Confira a árvore de Habilidades Supremas.</p>
+            <button type="button" className="supreme-notice-button" onClick={() => { setSupremeUnlockNotice(false); navigate('supremas') }}>ETA PORRAKKKK <span aria-hidden="true">↗</span></button>
+          </section>
+        </div>
+      )}
+      
     </AppLayout>
   )
 }

@@ -66,21 +66,25 @@ export default function Dashboard({
     }
 
     async function preloadTalentDetails() {
-      const [talentsResult, prerequisitesResult, treeRequirementsResult] = await Promise.all([
+      const [talentsResult, prerequisitesResult, treeRequirementsResult, progressResult, treeProgressResult] = await Promise.all([
         supabase!.from('talents_safe')
-          .select('id, tree_key, name, icon_url, description, max_level, is_hidden, is_supreme')
+          .select('id, tree_key, name, icon_url, description, max_level, points_per_level, is_hidden, is_supreme, supreme_stars, supreme_unlocked')
           .in('id', ids),
         supabase!.from('talent_prerequisites_safe')
-          .select('talent_id, required_points, prerequisite_name, prerequisite_is_hidden')
+          .select('talent_id, prerequisite_talent_id, required_points, prerequisite_name, prerequisite_is_hidden')
           .in('talent_id', ids),
         supabase!.from('talent_tree_requirements_safe')
           .select('talent_id, required_tree_key, required_points')
           .in('talent_id', ids),
+        supabase!.from('talent_progress_safe').select('talent_id, points'),
+        supabase!.from('talent_tree_progress_safe').select('tree_key, total_points'),
       ])
 
-      if (cancelled || talentsResult.error || prerequisitesResult.error || treeRequirementsResult.error) return
+      if (cancelled || talentsResult.error || prerequisitesResult.error || treeRequirementsResult.error || progressResult.error || treeProgressResult.error) return
 
       const activePoints = new Map(activeTalents.map((talent) => [talent.id, talent.points]))
+      const allTalentPoints = new Map((progressResult.data ?? []).map((row) => [row.talent_id, Number(row.points)]))
+      const pointsByTree = new Map((treeProgressResult.data ?? []).map((row) => [row.tree_key, Number(row.total_points)]))
       const nextCache: Record<string, TalentDetails> = {}
       for (const talent of talentsResult.data ?? []) {
         nextCache[talent.id] = {
@@ -90,6 +94,11 @@ export default function Dashboard({
           treeRequirements: (treeRequirementsResult.data ?? [])
             .filter((item) => item.talent_id === talent.id)
             .map(({ required_tree_key, required_points }) => ({ required_tree_key, required_points })),
+          requirements_met:
+            (prerequisitesResult.data ?? []).filter((item) => item.talent_id === talent.id)
+              .every((item) => (allTalentPoints.get(item.prerequisite_talent_id) ?? 0) >= Number(item.required_points)) &&
+            (treeRequirementsResult.data ?? []).filter((item) => item.talent_id === talent.id)
+              .every((item) => (pointsByTree.get(item.required_tree_key) ?? 0) >= Number(item.required_points)),
         } as TalentDetails
       }
       setTalentDetailsCache(nextCache)

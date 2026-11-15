@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
   AlertCircle,
@@ -29,20 +29,22 @@ type Talent = {
   icon_url: string | null
   description: string | null
   max_level: number
+  points_per_level: number
   is_hidden: boolean
   is_supreme: boolean
+  supreme_stars: 2 | 3
+  supreme_unlocked: boolean
+  requirements_met?: boolean
   sort_order: number
   analyses_required: number
   analyses_completed: number
   current_points: number
 }
 
-type PrerequisiteTalent = {
-  id: string
-  name: string
-  tree_key: string
-  is_hidden: boolean
-}
+type PrerequisiteTalent = Pick<
+  Talent,
+  'id' | 'name' | 'tree_key' | 'max_level' | 'is_hidden'
+>
 
 type TalentPrerequisite = {
   talent_id: string
@@ -67,7 +69,10 @@ type TalentForm = {
   icon_url: string
   description: string
   max_level: number
+  points_per_level: number
   is_hidden: boolean
+  supreme_stars: 2 | 3
+  supreme_unlocked: boolean
   analyses_required: number
   analyses_completed: number
   prerequisites: Array<{
@@ -99,6 +104,8 @@ type TreeApex = {
   description: string | null
   is_available: boolean
   is_revealed: boolean
+  is_unlocked: boolean
+  is_hidden: boolean
   current_points: number
 }
 
@@ -129,7 +136,10 @@ const emptyForm: TalentForm = {
   icon_url: '',
   description: '',
   max_level: 1,
+  points_per_level: 1,
   is_hidden: false,
+  supreme_stars: 2,
+  supreme_unlocked: false,
   analyses_required: 0,
   analyses_completed: 0,
   prerequisites: [],
@@ -213,6 +223,7 @@ export default function TalentTree({
   const [draggedTalentId, setDraggedTalentId] = useState<string | null>(null)
   const [savingOrder, setSavingOrder] = useState(false)
   const [talents, setTalents] = useState<TalentWithPrerequisites[]>([])
+  const [allPrerequisiteTalents, setAllPrerequisiteTalents] = useState<PrerequisiteTalent[]>([])
   const [treeDistributed, setTreeDistributed] = useState(0)
   const [selectedTalent, setSelectedTalent] =
     useState<TalentWithPrerequisites | null>(null)
@@ -224,8 +235,10 @@ export default function TalentTree({
   const [apex, setApex] = useState<TreeApex | null>(null)
   const [apexEditorOpen, setApexEditorOpen] = useState(false)
   const [apexDetailsOpen, setApexDetailsOpen] = useState(false)
+  const [apexUnlockNotice, setApexUnlockNotice] = useState(false)
   const [apexSaving, setApexSaving] = useState(false)
-  const [apexForm, setApexForm] = useState({ name: '', icon_url: '', required_points: 0, description: '', is_revealed: false })
+  const apexUnlockInFlight = useRef(false)
+  const [apexForm, setApexForm] = useState({ name: '', icon_url: '', required_points: 0, description: '', is_revealed: false, is_unlocked: false, is_hidden: true })
 
   const [modalOpen, setModalOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -243,7 +256,7 @@ export default function TalentTree({
   const [selectedFilter, setSelectedFilter] = useState<
     'all' | 'active' | 'inactive' | 'unknown'
   >('all')
-  const [pointsFilter, setPointsFilter] = useState<'all' | 'with' | 'without'>('all')
+  const [pointsFilter, setPointsFilter] = useState<'all' | 'with' | 'without' | 'unlocked' | 'locked'>('all')
 
   useEffect(() => {
     let cancelled = false
@@ -259,9 +272,9 @@ export default function TalentTree({
       }
 
       const { data: talentData, error: talentError } = await supabase
-        .from('talents_safe')
+        .from('talents_player_safe')
         .select(
-          'id, tree_key, name, icon_url, description, max_level, is_hidden, is_supreme, analyses_required, analyses_completed, sort_order, created_at',
+          'id, tree_key, name, icon_url, description, max_level, points_per_level, is_hidden, is_supreme, supreme_stars, supreme_unlocked, analyses_required, analyses_completed, sort_order, created_at',
         )
         .eq('tree_key', tree.id)
         .order('sort_order', { ascending: true }).order('created_at', { ascending: true })
@@ -280,12 +293,33 @@ export default function TalentTree({
         'current_points'
       >[]
 
+      // Pré-requisitos podem pertencer a qualquer árvore, não apenas à árvore aberta.
+      if (isAdmin) {
+        // A seleção de pré-requisitos é uma ferramenta administrativa:
+        // precisa listar também talentos ocultos, com seus nomes reais.
+        const { data: prerequisiteCandidates, error: candidatesError } = await supabase
+          .from('talents')
+          .select('id, name, tree_key, max_level, is_hidden')
+          .order('tree_key')
+          .order('name')
+
+        if (cancelled) return
+        if (candidatesError) {
+          console.error('Erro ao carregar talentos para pré-requisitos:', candidatesError.message)
+        } else {
+          setAllPrerequisiteTalents((prerequisiteCandidates ?? []) as PrerequisiteTalent[])
+        }
+      } else {
+        setAllPrerequisiteTalents([])
+      }
+
       const talentIds = loadedTalents.map((talent) => talent.id)
 
       const [
         prerequisiteResult,
         treeRequirementResult,
         progressResult,
+        treeProgressResult,
         apexResult,
       ] = await Promise.all([
         supabase
@@ -300,9 +334,9 @@ export default function TalentTree({
 
         supabase
           .from('talent_progress_safe')
-          .select('talent_id, points')
-          .in('talent_id', talentIds),
-        supabase.from('talent_tree_apices_safe').select('*').eq('tree_key', tree.id).maybeSingle(),
+          .select('talent_id, points'),
+        supabase.from('talent_tree_progress_safe').select('tree_key, total_points'),
+        supabase.rpc('get_talent_tree_apex_for_player', { p_tree_key: tree.id }),
       ])
 
       if (cancelled) return
@@ -331,6 +365,13 @@ export default function TalentTree({
         return
       }
 
+      if (treeProgressResult.error) {
+        console.error('Erro ao carregar totais das árvores:', treeProgressResult.error.message)
+        setError('Não foi possível verificar os pré-requisitos das habilidades supremas.')
+        setLoading(false)
+        return
+      }
+
       if (apexResult.error) {
         console.error('Erro ao carregar o Ápice:', apexResult.error.message)
         setError('Não foi possível carregar o Ápice desta árvore. Execute a migração de Ápices no Supabase.')
@@ -338,10 +379,23 @@ export default function TalentTree({
         return
       }
 
-      const loadedApex = apexResult.data as TreeApex | null
+      let loadedApex = apexResult.data as TreeApex | null
+      if (isAdmin && loadedApex) {
+        const { data: rawApex, error: rawApexError } = await supabase
+          .from('talent_tree_apices')
+          .select('name, icon_url, description, required_points, is_hidden, is_unlocked, is_revealed')
+          .eq('tree_key', tree.id)
+          .maybeSingle()
+        if (cancelled) return
+        if (rawApexError) {
+          console.error('Erro ao carregar dados administrativos do Ápice:', rawApexError.message)
+        } else if (rawApex) {
+          loadedApex = { ...loadedApex, ...rawApex } as TreeApex
+        }
+      }
       setApex(loadedApex)
       if (loadedApex) {
-        setApexForm({ name: loadedApex.name === '???' ? '' : loadedApex.name, icon_url: loadedApex.icon_url ?? '', required_points: Number(loadedApex.required_points), description: loadedApex.description ?? '', is_revealed: loadedApex.is_revealed })
+        setApexForm({ name: loadedApex.name, icon_url: loadedApex.icon_url ?? '', required_points: Number(loadedApex.required_points ?? 0), description: loadedApex.description ?? '', is_revealed: Boolean(loadedApex.is_revealed), is_unlocked: Boolean(loadedApex.is_unlocked), is_hidden: Boolean(loadedApex.is_hidden) })
       }
 
       if (progressResult.error) {
@@ -356,17 +410,47 @@ export default function TalentTree({
         return
       }
 
-      const loadedPrerequisites: TalentPrerequisite[] =
-        (prerequisiteResult.data ?? []).map((item) => ({
-          talent_id: item.talent_id,
-          required_points: Number(item.required_points),
-          prerequisite: {
-            id: item.prerequisite_talent_id,
-            name: item.prerequisite_name,
-            tree_key: item.prerequisite_tree_key,
-            is_hidden: item.prerequisite_is_hidden,
-          },
-        }))
+      const prerequisiteRows = prerequisiteResult.data ?? []
+      const prerequisiteTalentIds = [
+        ...new Set(prerequisiteRows.map((item) => item.prerequisite_talent_id)),
+      ]
+
+      const { data: prerequisiteTalentLevels, error: prerequisiteTalentLevelsError } =
+        prerequisiteTalentIds.length > 0
+          ? await supabase
+              .from('talents')
+              .select('id, max_level')
+              .in('id', prerequisiteTalentIds)
+          : { data: [], error: null }
+
+      if (prerequisiteTalentLevelsError) {
+        console.error(
+          'Erro ao carregar limites dos pré-requisitos:',
+          prerequisiteTalentLevelsError.message,
+        )
+        setError('Não foi possível carregar os limites de nível dos pré-requisitos.')
+        setLoading(false)
+        return
+      }
+
+      const maxLevelByPrerequisite = new Map(
+        (prerequisiteTalentLevels ?? []).map((talent) => [
+          talent.id,
+          Number(talent.max_level ?? 1),
+        ]),
+      )
+
+      const loadedPrerequisites: TalentPrerequisite[] = prerequisiteRows.map((item) => ({
+        talent_id: item.talent_id,
+        required_points: Number(item.required_points),
+        prerequisite: {
+          id: item.prerequisite_talent_id,
+          name: item.prerequisite_name,
+          tree_key: item.prerequisite_tree_key,
+          max_level: maxLevelByPrerequisite.get(item.prerequisite_talent_id) ?? 1,
+          is_hidden: item.prerequisite_is_hidden,
+        },
+      }))
 
       const loadedTreeRequirements =
         (treeRequirementResult.data ?? []) as TalentTreeRequirement[]
@@ -380,22 +464,36 @@ export default function TalentTree({
         ]),
       )
 
+      const treePointsByKey = new Map((treeProgressResult.data ?? []).map((row) => [row.tree_key, Number(row.total_points)]))
       const talentsWithPrerequisites: TalentWithPrerequisites[] =
-        loadedTalents.map((talent) => ({
-          ...talent,
-          current_points: progressByTalent.get(talent.id) ?? 0,
-          prerequisites: loadedPrerequisites.filter(
-            (prerequisite) => prerequisite.talent_id === talent.id,
-          ),
-          treeRequirements: loadedTreeRequirements.filter(
-            (requirement) => requirement.talent_id === talent.id,
-          ),
-        }))
+        loadedTalents.map((talent) => {
+          // supreme_unlocked é a fonte de verdade para a visibilidade das Supremas.
+          const visibleTalent = talent.is_supreme && talent.supreme_unlocked
+            ? { ...talent, is_hidden: false }
+            : talent
+          const prerequisites = loadedPrerequisites.filter((item) => item.talent_id === talent.id)
+          const treeRequirements = loadedTreeRequirements.filter((item) => item.talent_id === talent.id)
+          const requirementsMet = prerequisites.every((item) =>
+            (progressByTalent.get(item.prerequisite?.id ?? '') ?? 0) >= Number(item.required_points)
+          ) && treeRequirements.every((item) =>
+            (treePointsByKey.get(item.required_tree_key) ?? 0) >= Number(item.required_points)
+          )
+          return {
+            ...visibleTalent,
+            current_points: progressByTalent.get(talent.id) ?? 0,
+            prerequisites,
+            treeRequirements,
+            requirements_met: requirementsMet,
+          }
+        })
 
-      const distributedInTree = loadedProgress.reduce(
-        (sum, progress) => sum + Number(progress.points),
-        0,
-      )
+      const costByTalent = new Map(loadedTalents.map((talent) => [talent.id, talent.is_supreme ? 0 : Number(talent.points_per_level ?? 1)]))
+      // O resumo desta página deve considerar somente talentos pertencentes a esta árvore.
+      // Antes, progressos de outras árvores eram somados pelo fallback de custo 1.
+      const distributedInTree = loadedProgress.reduce((sum, progress) => {
+        const cost = costByTalent.get(progress.talent_id)
+        return cost === undefined ? sum : sum + Number(progress.points) * cost
+      }, 0)
 
       setTalents(talentsWithPrerequisites)
       setTreeDistributed(distributedInTree + Number(loadedApex?.current_points ?? 0))
@@ -426,6 +524,7 @@ export default function TalentTree({
   }, [selectedTalent, modalOpen, deletingTalent, saving, deleteLoading])
 
   function openTalent(talent: TalentWithPrerequisites) {
+    if (talent.is_hidden) return
     setSelectedTalent(talent)
   }
 
@@ -438,14 +537,30 @@ export default function TalentTree({
     }
   }, [focusTalentId, loading, talents, onFocusTalentHandled])
 
+  function notifyApexUnlockOnce(nextApex: TreeApex) {
+    if (!nextApex.is_unlocked || nextApex.is_hidden) return
+    // Um registro independente por árvore impede que o aviso do Ápice Supremo
+    // seja confundido com os avisos dos Ápices comuns.
+    const key = `raziel:seen-apex-unlock:v2:${tree.id}`
+    try {
+      if (window.localStorage.getItem(key) === '1') return
+      window.localStorage.setItem(key, '1')
+    } catch { /* armazenamento indisponível: evita duplicação nesta sessão */ }
+    setApexUnlockNotice(true)
+  }
+
+  useEffect(() => {
+    if (apex) notifyApexUnlockOnce(apex)
+  }, [apex, tree.id])
+
   async function changeTalentPoints(
     talent: TalentWithPrerequisites,
     delta: 1 | -1,
   ) {
     if (!supabase || updatingTalentId) return
 
-    if (delta === 1 && totalAvailable <= 0) {
-      setProgressMessage('Não há pontos disponíveis para distribuir.')
+    if (delta === 1 && totalAvailable < talent.points_per_level) {
+      setProgressMessage(`São necessários ${talent.points_per_level} pontos para evoluir esta habilidade.`)
       return
     }
 
@@ -502,9 +617,9 @@ export default function TalentTree({
       ),
     )
 
-    setTreeDistributed(
-      (current) => current + (updatedPoints - previousPoints),
-    )
+    const previousCost = previousPoints * talent.points_per_level
+    const updatedCost = updatedPoints * talent.points_per_level
+    setTreeDistributed((current) => current + (updatedCost - previousCost))
 
     setSelectedTalent((current) =>
       current?.id === talent.id
@@ -512,14 +627,28 @@ export default function TalentTree({
         : current,
     )
 
-    onProgressChanged(tree.id, previousPoints, updatedPoints)
-    setReloadKey((current) => current + 1)
+    onProgressChanged(tree.id, previousCost, updatedCost)
+
+    // Recarrega o estado do Ápice após a progressão; a elegibilidade é calculada
+    // separadamente do estado administrativo de desbloqueio.
+    if (apex) {
+      const { data: refreshedApex } = await supabase.rpc(
+        'get_talent_tree_apex_for_player',
+        { p_tree_key: tree.id },
+      )
+      if (refreshedApex) {
+        const nextApex = refreshedApex as TreeApex
+        if (!apex.is_unlocked && nextApex.is_unlocked) notifyApexUnlockOnce(nextApex)
+        setApex(nextApex)
+      }
+    }
 
     setUpdatingTalentId(null)
   }
 
   async function changeApexPoints(delta: 1 | -1) {
     if (!supabase || !apex || updatingTalentId) return
+    if (delta === 1 && (apex.is_hidden || !apex.is_unlocked || (tree.id === 'supremo' ? !supremeApexEligible : treeDistributed - apex.current_points < apex.required_points))) { setProgressMessage('O Ápice ainda não atende às condições para receber pontos.'); return }
     if (delta === 1 && totalAvailable <= 0) { setProgressMessage('Não há pontos disponíveis para distribuir.'); return }
     setUpdatingTalentId('apex')
     const { data, error } = await supabase.rpc('change_talent_tree_apex_points', { p_tree_key: tree.id, p_delta: delta })
@@ -532,33 +661,42 @@ export default function TalentTree({
   }
 
   async function saveApex() {
-    if (!supabase || !isAdmin || !apex) return
+    if (!supabase || !isAdmin) return
     if (!apexForm.name.trim()) { setProgressMessage('Informe um nome para o Ápice.'); return }
-    if (!Number.isInteger(apexForm.required_points) || apexForm.required_points < 0) { setProgressMessage('A quantidade de pontos deve ser um inteiro igual ou maior que zero.'); return }
+    if (tree.id !== 'supremo' && (!Number.isInteger(apexForm.required_points) || apexForm.required_points < 0)) { setProgressMessage('A quantidade de pontos deve ser um inteiro igual ou maior que zero.'); return }
     setApexSaving(true)
     const { error } = await supabase.from('talent_tree_apices').upsert({
       tree_key: tree.id, name: apexForm.name.trim(), icon_url: apexForm.icon_url.trim() || null,
-      required_points: apexForm.required_points, description: apexForm.description.trim(), is_revealed: apexForm.is_revealed,
+      required_points: tree.id === 'supremo' ? 0 : apexForm.required_points,
+      description: apexForm.description.trim(),
+      is_revealed: !apexForm.is_hidden,
+      is_unlocked: tree.id === 'supremo' ? Boolean(apex?.is_unlocked || supremeApexEligible) : Boolean(apex?.is_unlocked),
+      is_hidden: apexForm.is_hidden && !supremeApexEligible,
     }, { onConflict: 'tree_key' })
     if (error) { setProgressMessage(error.message || 'Não foi possível salvar o Ápice.'); setApexSaving(false); return }
-    const { data } = await supabase.from('talent_tree_apices_safe').select('*').eq('tree_key', tree.id).maybeSingle()
-    setApex(data as TreeApex | null)
+    const { data, error: reloadError } = await supabase.rpc('get_talent_tree_apex_for_player', { p_tree_key: tree.id })
+    if (reloadError) setProgressMessage(reloadError.message)
+    const savedApex = data as TreeApex | null
+    if (savedApex && !apex?.is_unlocked && savedApex.is_unlocked) notifyApexUnlockOnce(savedApex)
+    setApex(savedApex)
     setApexSaving(false)
     setApexEditorOpen(false)
   }
 
-  const allAvailableTalentsForPrereq = talents.map((t) => ({
-    id: t.id,
-    tree_key: t.tree_key,
-    name: t.name,
-    icon_url: t.icon_url,
-    description: t.description,
-    max_level: t.max_level,
-    is_hidden: t.is_hidden,
-    is_supreme: t.is_supreme,
-  }))
+  function openApexEditor() {
+    setApexForm({
+      name: apex?.name && apex.name !== '???' ? apex.name : '',
+      icon_url: apex?.icon_url ?? '',
+      required_points: Number(apex?.required_points ?? 0),
+      description: apex?.description ?? '',
+      is_revealed: Boolean(apex?.is_revealed),
+      is_unlocked: Boolean(apex?.is_unlocked),
+      is_hidden: apex ? Boolean(apex.is_hidden) : true,
+    })
+    setApexEditorOpen(true)
+  }
 
-  const availablePrerequisites = talents.filter((talent) => {
+  const availablePrerequisites = allPrerequisiteTalents.filter((talent) => {
     if (talent.id === editingId) return false
     const normalizedSearch = prerequisiteSearch
       .trim()
@@ -577,9 +715,18 @@ export default function TalentTree({
     setProgressMessage('')
 
     const [
+      talentRecordResult,
       prerequisiteResult,
       treeRequirementResult,
     ] = await Promise.all([
+      // A view pública mascara nomes de talentos ocultos. O editor é administrativo
+      // e deve sempre carregar o nome original armazenado, nunca "???".
+      supabase
+        .from('talents')
+        .select('id, name, icon_url, description, is_hidden, supreme_unlocked')
+        .eq('id', talent.id)
+        .single(),
+
       supabase
         .from('talent_prerequisites')
         .select('prerequisite_talent_id, required_points')
@@ -591,16 +738,16 @@ export default function TalentTree({
         .eq('talent_id', talent.id),
     ])
 
-    if (prerequisiteResult.error || treeRequirementResult.error) {
+    if (talentRecordResult.error || prerequisiteResult.error || treeRequirementResult.error) {
       setError(
-        `Não foi possível carregar os requisitos: ${prerequisiteResult.error?.message ??
+        `Não foi possível carregar os dados para edição: ${talentRecordResult.error?.message ?? prerequisiteResult.error?.message ??
         treeRequirementResult.error?.message
         }`,
       )
       return
     }
 
-    if (talent.max_level < talent.current_points) {
+    if (!talent.is_supreme && talent.max_level < talent.current_points) {
       setError(
         `O nível máximo não pode ser menor que os ${talent.current_points} pontos já distribuídos neste talento.`,
       )
@@ -611,11 +758,14 @@ export default function TalentTree({
 
     setForm({
       tree_key: talent.tree_key,
-      name: talent.name,
-      icon_url: talent.icon_url ?? '',
-      description: talent.description ?? '',
+      name: talentRecordResult.data.name,
+      icon_url: talentRecordResult.data.icon_url ?? '',
+      description: talentRecordResult.data.description ?? '',
       max_level: talent.max_level,
-      is_hidden: talent.is_hidden,
+      points_per_level: talent.points_per_level ?? 1,
+      is_hidden: Boolean(talentRecordResult.data.is_hidden),
+      supreme_stars: talent.supreme_stars ?? 2,
+      supreme_unlocked: Boolean(talentRecordResult.data.supreme_unlocked ?? talent.supreme_unlocked),
       analyses_required: talent.analyses_required ?? 0,
       analyses_completed: talent.analyses_completed ?? 0,
 
@@ -741,11 +891,13 @@ export default function TalentTree({
     if (!supabase || saving || !editingId) return
 
     const name = form.name.trim()
-    const maxLevel = Number(form.max_level)
+    const isSupreme = form.tree_key === 'supremo'
+    const maxLevel = isSupreme ? 1 : Number(form.max_level)
+    const pointsPerLevel = isSupreme ? 1 : Number(form.points_per_level)
     const iconUrl = form.icon_url.trim()
 
     const currentTalent = talents.find((t) => t.id === editingId)
-    if (currentTalent && maxLevel < currentTalent.current_points) {
+    if (currentTalent && !currentTalent.is_supreme && maxLevel < currentTalent.current_points) {
       setError(
         `O nível máximo não pode ser menor que os ${currentTalent.current_points} pontos já distribuídos neste talento.`,
       )
@@ -758,9 +910,11 @@ export default function TalentTree({
     }
 
     if (!Number.isInteger(maxLevel) || maxLevel < 1) {
-      setError(
-        'O nível máximo deve ser um número inteiro maior que zero.',
-      )
+      setError('O nível máximo deve ser um número inteiro maior que zero.')
+      return
+    }
+    if (!Number.isInteger(pointsPerLevel) || pointsPerLevel < 1) {
+      setError('O custo por nível deve ser um número inteiro maior que zero.')
       return
     }
 
@@ -829,8 +983,11 @@ export default function TalentTree({
       icon_url: iconUrl,
       description: form.description.trim(),
       max_level: maxLevel,
-      is_hidden: form.is_hidden,
-      is_supreme: form.tree_key === 'supremo',
+      points_per_level: pointsPerLevel,
+      is_hidden: isSupreme ? !form.supreme_unlocked : form.is_hidden,
+      is_supreme: isSupreme,
+      supreme_stars: isSupreme ? form.supreme_stars : 2,
+      supreme_unlocked: isSupreme ? form.supreme_unlocked : false,
       analyses_required: form.is_hidden && form.tree_key !== 'supremo' ? analysesRequired : 0,
       analyses_completed: form.is_hidden && form.tree_key !== 'supremo' ? analysesCompleted : 0,
     }
@@ -849,6 +1006,13 @@ export default function TalentTree({
       )
       setSaving(false)
       return
+    }
+
+    if (isSupreme) {
+      const { error: refreshError } = await supabase.rpc('refresh_automatic_compendium_unlocks')
+      if (refreshError) {
+        console.error('Não foi possível atualizar a revelação da Habilidade Suprema:', refreshError.message)
+      }
     }
 
     const talentId = result.data.id
@@ -1037,7 +1201,7 @@ export default function TalentTree({
     setDeleteError('')
 
     const target = deletingTalent
-    const removedPoints = target.current_points ?? 0
+    const removedPoints = (target.current_points ?? 0) * target.points_per_level
     const wasActive = removedPoints > 0
 
     const { error: deleteErrorResult } = await supabase
@@ -1110,21 +1274,59 @@ export default function TalentTree({
     .trim()
     .toLocaleLowerCase('pt-BR')
 
-  const filteredTalents = sortingMode ? talents : talents.filter((talent) => {
-    const matchesFilter =
-      selectedFilter === 'all' ||
-      (selectedFilter === 'active' &&
-        !talent.is_hidden &&
-        talent.current_points > 0) ||
-      (selectedFilter === 'inactive' &&
-        !talent.is_hidden &&
-        talent.current_points === 0) ||
-      (selectedFilter === 'unknown' && talent.is_hidden)
+  const supremeApexEligible = tree.id === 'supremo' && talents.length > 0 && talents.every((item) => item.is_supreme && item.supreme_unlocked && item.requirements_met === true)
 
-    const matchesPoints =
-      pointsFilter === 'all' ||
-      (pointsFilter === 'with' && talent.current_points > 0) ||
-      (pointsFilter === 'without' && talent.current_points === 0)
+  // Sincroniza o desbloqueio persistente do Ápice assim que a condição real for atingida.
+  // O banco é a fonte de verdade; a chamada também corrige estados antigos já elegíveis.
+  useEffect(() => {
+    if (!supabase || !apex || apex.is_unlocked || apexUnlockInFlight.current) return
+    const eligible = tree.id === 'supremo'
+      ? supremeApexEligible
+      : treeDistributed - apex.current_points >= apex.required_points
+    if (!eligible) return
+
+    apexUnlockInFlight.current = true
+    void (async () => {
+      const { error: refreshError } = await supabase.rpc('refresh_automatic_compendium_unlocks')
+      if (refreshError) {
+        console.error('Não foi possível sincronizar o desbloqueio do Ápice:', refreshError.message)
+        setProgressMessage('A condição foi alcançada, mas o banco não conseguiu registrar o desbloqueio. Verifique se a migration de correção foi executada.')
+        return
+      }
+      const { data, error: apexError } = await supabase.rpc(
+        'get_talent_tree_apex_for_player',
+        { p_tree_key: tree.id },
+      )
+      if (apexError) {
+        setProgressMessage(apexError.message)
+        return
+      }
+      if (data) {
+        const updatedApex = data as TreeApex
+        setApex(updatedApex)
+        if (updatedApex.is_unlocked) notifyApexUnlockOnce(updatedApex)
+      }
+    })().finally(() => { apexUnlockInFlight.current = false })
+  }, [apex, tree.id, treeDistributed, supremeApexEligible])
+
+  const filteredTalents = sortingMode ? talents : talents.filter((talent) => {
+    const matchesFilter = tree.id === 'supremo'
+      ? selectedFilter === 'all' ||
+        (selectedFilter === 'active' && !talent.is_hidden && talent.requirements_met === true) ||
+        (selectedFilter === 'inactive' && !talent.is_hidden && talent.requirements_met !== true) ||
+        (selectedFilter === 'unknown' && talent.is_hidden)
+      : selectedFilter === 'all' ||
+        (selectedFilter === 'active' && !talent.is_hidden && talent.current_points > 0) ||
+        (selectedFilter === 'inactive' && !talent.is_hidden && talent.current_points === 0) ||
+        (selectedFilter === 'unknown' && talent.is_hidden)
+
+    const matchesPoints = tree.id === 'supremo'
+      ? pointsFilter === 'all' ||
+        (pointsFilter === 'unlocked' && talent.supreme_unlocked && !talent.is_hidden) ||
+        (pointsFilter === 'locked' && (!talent.supreme_unlocked || talent.is_hidden))
+      : pointsFilter === 'all' ||
+        (pointsFilter === 'with' && talent.current_points > 0) ||
+        (pointsFilter === 'without' && talent.current_points === 0)
 
     const matchesSearch =
       normalizedSearch.length === 0 ||
@@ -1195,38 +1397,71 @@ export default function TalentTree({
       </section>
 
       <section className={`tree-summary${tree.id === 'supremo' ? ' supreme-tree-apex' : ''}`}>
-        <div>
-          <span>PONTOS DISPONÍVEIS</span>
-          <strong>{totalAvailable}</strong>
-        </div>
+        {tree.id === 'supremo' ? (
+          <>
+            <div>
+              <span>HABILIDADES SUPREMAS EXISTENTES</span>
+              <strong>{talents.filter((talent) => talent.is_supreme).length}</strong>
+            </div>
+            <div>
+              <span>HABILIDADES SUPREMAS DESCOBERTAS</span>
+              <strong>{talents.filter((talent) => talent.is_supreme && talent.supreme_unlocked).length}</strong>
+            </div>
+          </>
+        ) : (
+          <>
+            <div><span>PONTOS DISPONÍVEIS</span><strong>{totalAvailable}</strong></div>
+            <div><span>PONTOS DISTRIBUÍDOS NESTA ÁRVORE</span><strong>{treeDistributed}</strong></div>
+          </>
+        )}
 
-        <div>
-          <span>PONTOS DISTRIBUÍDOS NESTA ÁRVORE</span>
-          <strong>{treeDistributed}</strong>
-        </div>
-
-        {apex && (
-          <div className="tree-apex-summary" style={{ marginLeft: 'auto' }}>
-            <button type="button" className="tree-apex-main" onClick={() => apex.is_available ? setApexDetailsOpen(true) : undefined} disabled={!apex.is_available}>
-              <span className="tree-apex-emblem">{apex.is_available && apex.icon_url ? <img src={apex.icon_url} alt="" /> : <Crown size={23} />}</span>
-              <span className="tree-apex-copy">
-                <small>ÁPICE</small>
-                <strong>{apex.is_available || isAdmin ? apex.name : 'Ápice: ???'}</strong>
-                <em>{apex.is_available ? `${apex.current_points}/1 ponto distribuído` : tree.id === 'supremo' ? 'Desbloqueie todas as combinações ocultas nessa árvore e ative simultaneamente para descobrir o ápice dela' : `Gaste ${apex.required_points} pontos nessa árvore para descobrir o ápice dela`}</em>
-              </span>
-            </button>
-            {(apex.is_available || apex.current_points > 0) && (
-              <div className="tree-apex-controls">
-                <button type="button" aria-label="Remover ponto do Ápice" disabled={apex.current_points <= 0 || updatingTalentId !== null} onClick={() => void changeApexPoints(-1)}><Minus size={15}/></button>
-                {apex.is_available && <button type="button" aria-label="Adicionar ponto ao Ápice" disabled={apex.current_points >= 1 || totalAvailable <= 0 || updatingTalentId !== null} onClick={() => void changeApexPoints(1)}><Plus size={15}/></button>}
-              </div>
-            )}
-            {isAdmin && <button type="button" className="tree-apex-edit" aria-label="Editar Ápice" onClick={() => setApexEditorOpen(true)}><Pencil size={15}/></button>}
+        {(apex || isAdmin) && (
+          <div className={`tree-apex-summary${tree.id === 'supremo' && apex?.is_unlocked && !apex.is_hidden ? ' tree-apex-unlocked-gold' : ''}`} style={{ marginLeft: 'auto' }}>
+            {apex ? <>
+              <button type="button" className="tree-apex-main" onClick={() => !apex.is_hidden ? setApexDetailsOpen(true) : undefined} disabled={apex.is_hidden}>
+                <span className="tree-apex-emblem">{!apex.is_hidden && apex.icon_url ? <img src={apex.icon_url} alt="" /> : <Crown size={23} />}</span>
+                <span className="tree-apex-copy">
+                  <small>ÁPICE {apex.is_unlocked ? <span className="apex-gold-star">★</span> : null} {apex.is_hidden ? '· OCULTO' : ''}</small>
+                  <strong>{apex.is_hidden ? '???' : apex.name}</strong>
+                  <em>{tree.id === 'supremo' ? 'CONHECIMENTO PROIBIDO' : apex.is_unlocked && !apex.is_hidden ? `${Math.max(0, treeDistributed - apex.current_points)}/${apex.required_points} pontos distribuídos nesta árvore` : `Necessário distribuir ${Math.max(0, apex.required_points - (treeDistributed - apex.current_points))} pontos nesta árvore para desbloquear seu Ápice`}</em>
+                </span>
+              </button>
+              {tree.id !== 'supremo' && apex.is_unlocked && !apex.is_hidden && (
+                <div className="tree-apex-controls">
+                  <button type="button" aria-label="Remover ponto do Ápice" disabled={apex.current_points <= 0 || updatingTalentId !== null} onClick={() => void changeApexPoints(-1)}><Minus size={15}/></button>
+                  <button type="button" aria-label="Adicionar ponto ao Ápice" disabled={apex.current_points >= 1 || (tree.id === 'supremo' ? !supremeApexEligible : treeDistributed - apex.current_points < apex.required_points) || totalAvailable <= 0 || updatingTalentId !== null} onClick={() => void changeApexPoints(1)}><Plus size={15}/></button>
+                </div>
+              )}
+            </> : <span className="tree-apex-copy"><small>ÁPICE</small><strong>Nenhum Ápice cadastrado</strong></span>}
+            {isAdmin && <button type="button" className="tree-apex-edit" aria-label={apex ? 'Editar Ápice' : 'Criar Ápice'} onClick={openApexEditor}><Pencil size={15}/></button>}
           </div>
         )}
       </section>
 
-      {apexDetailsOpen && apex?.is_available && (
+      {apexUnlockNotice && apex && apex.is_unlocked && !apex.is_hidden && (
+        <div className={`talent-modal-backdrop${tree.id === 'supremo' ? ' tree-apex-supreme-backdrop' : ''}`} role="presentation">
+          <section className={`talent-modal tree-apex-modal${tree.id === 'supremo' ? ' tree-apex-supreme-notice' : ''}`} role="dialog" aria-modal="true" aria-labelledby="apex-unlock-notice-title" style={{ textAlign: 'center' }}>
+            <div className="tree-apex-modal-icon">{apex.icon_url ? <img src={apex.icon_url} alt="" /> : <Crown size={30} />}</div>
+            {tree.id === 'supremo' ? (
+              <>
+                <div className="eyebrow">CONHECIMENTO ABSOLUTO REVELADO</div>
+                <h2 id="apex-unlock-notice-title">Você desbloqueou o conhecimento absoluto!</h2>
+                <p>Tudo agora é possível, tudo. Cuidado.</p>
+                <button type="button" className="talent-primary-button" onClick={() => { setApexUnlockNotice(false); setApexDetailsOpen(true) }}>EBAAA, QUERO CONFERIR</button>
+              </>
+            ) : (
+              <>
+                <div className="eyebrow">NOVO CONHECIMENTO DESBLOQUEADO</div>
+                <h2 id="apex-unlock-notice-title">Você desbloqueou o ápice desta árvore.</h2>
+                <p>Um novo patamar foi alcançado. Seu ápice está disponível para consulta.</p>
+                <button type="button" className="talent-primary-button" onClick={() => { setApexUnlockNotice(false); setApexDetailsOpen(true) }}>Conferir Ápice</button>
+              </>
+            )}
+          </section>
+        </div>
+      )}
+
+      {apexDetailsOpen && apex && !apex.is_hidden && (
         <div className="talent-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setApexDetailsOpen(false) }}>
           <section className="talent-modal tree-apex-modal" role="dialog" aria-modal="true" aria-labelledby="apex-details-title">
             <button type="button" className="talent-modal-close" onClick={() => setApexDetailsOpen(false)}><X size={18}/></button>
@@ -1239,17 +1474,19 @@ export default function TalentTree({
         </div>
       )}
 
-      {apexEditorOpen && isAdmin && apex && (
+      {apexEditorOpen && isAdmin && (
         <div className="talent-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !apexSaving) setApexEditorOpen(false) }}>
           <section className="talent-modal tree-apex-editor" role="dialog" aria-modal="true" aria-labelledby="apex-editor-title">
             <button type="button" className="talent-modal-close" onClick={() => setApexEditorOpen(false)} disabled={apexSaving}><X size={18}/></button>
             <div className="eyebrow">CONFIGURAÇÃO ADMINISTRATIVA</div>
-            <h2 id="apex-editor-title">Editar Ápice</h2>
+            <h2 id="apex-editor-title">{apex ? 'Editar Ápice' : 'Criar Ápice'}</h2>
             <label>Nome<input value={apexForm.name} onChange={(e) => setApexForm(v => ({...v, name:e.target.value}))} placeholder="Nome do Ápice"/></label>
             <label>URL da imagem<input value={apexForm.icon_url} onChange={(e) => setApexForm(v => ({...v, icon_url:e.target.value}))} placeholder="https://..."/></label>
-            <label>Pontos necessários nesta árvore<input type="number" min={0} step={1} value={apexForm.required_points} onChange={(e) => setApexForm(v => ({...v, required_points:Math.max(0, Number(e.target.value) || 0)}))}/></label>
+            {tree.id !== 'supremo' && <label>Pontos necessários nesta árvore<input type="number" min={0} step={1} value={apexForm.required_points} onChange={(e) => setApexForm(v => ({...v, required_points:Math.max(0, Number(e.target.value) || 0)}))}/></label>}
             <label>Descrição / detalhes<textarea rows={5} value={apexForm.description} onChange={(e) => setApexForm(v => ({...v, description:e.target.value}))} placeholder="Descreva o efeito do Ápice..."/></label>
-            <label className="tree-apex-reveal-toggle"><input type="checkbox" checked={apexForm.is_revealed} onChange={(e) => setApexForm(v => ({...v, is_revealed:e.target.checked}))}/> Revelar Ápice para os jogadores</label>
+            <label className="tree-apex-reveal-toggle"><input type="checkbox" checked={tree.id === 'supremo' ? supremeApexEligible : apexForm.is_unlocked} disabled={tree.id === 'supremo'} onChange={(e) => setApexForm(v => ({...v, is_unlocked:e.target.checked, is_revealed:e.target.checked}))}/> Desbloqueado</label>
+            <label className="tree-apex-reveal-toggle"><input type="checkbox" checked={apexForm.is_hidden} onChange={(e) => setApexForm(v => ({...v, is_hidden:e.target.checked}))}/> Oculto</label>
+            {tree.id === 'supremo' && <p className="apex-supreme-rule-note">O Ápice Supremo é desbloqueado automaticamente quando todas as Habilidades Supremas estiverem desbloqueadas e com os pré-requisitos alcançados.</p>}
             <div className="talent-modal-actions"><button type="button" onClick={() => setApexEditorOpen(false)} disabled={apexSaving}>Cancelar</button><button type="button" onClick={() => void saveApex()} disabled={apexSaving}>{apexSaving ? 'Salvando...' : 'Salvar Ápice'}</button></div>
           </section>
         </div>
@@ -1447,13 +1684,19 @@ export default function TalentTree({
               })}
             </div>
 
-            <div role="group" aria-label="Filtrar por pontos distribuídos" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}>
-              <span style={{ color: '#9aa1a6', fontSize: '9px', letterSpacing: '.5px', fontWeight: 700 }}>PONTOS:</span>
-              {([
-                { value: 'all', label: 'Qualquer quantidade' },
-                { value: 'with', label: 'Com pontos distribuídos' },
-                { value: 'without', label: 'Sem pontos distribuídos' },
-              ] as const).map((filter) => {
+            <div role="group" aria-label={tree.id === 'supremo' ? 'Filtrar descobertas supremas' : 'Filtrar por pontos distribuídos'} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}>
+              <span style={{ color: '#9aa1a6', fontSize: '9px', letterSpacing: '.5px', fontWeight: 700 }}>{tree.id === 'supremo' ? 'DESCOBERTAS:' : 'PONTOS:'}</span>
+              {(tree.id === 'supremo'
+                ? [
+                    { value: 'all', label: 'Todas' },
+                    { value: 'unlocked', label: 'Descobertas' },
+                    { value: 'locked', label: 'Não descobertas' },
+                  ] as const
+                : [
+                    { value: 'all', label: 'Qualquer quantidade' },
+                    { value: 'with', label: 'Com pontos distribuídos' },
+                    { value: 'without', label: 'Sem pontos distribuídos' },
+                  ] as const).map((filter) => {
                 const isSelected = pointsFilter === filter.value
                 return <button key={filter.value} type="button" aria-pressed={isSelected} onClick={() => { setPointsFilter(filter.value); setCurrentPage(1) }} style={{ minHeight: '31px', padding: '6px 11px', border: `1px solid ${isSelected ? '#b9a47e' : '#e5e5e0'}`, borderRadius: '16px', background: isSelected ? '#f2eee5' : 'rgba(255,255,255,.72)', color: isSelected ? '#806d4c' : '#7d8993', cursor: 'pointer', font: 'inherit', fontSize: '9px', transition: 'all .18s ease' }}>{filter.label}</button>
               })}
@@ -1520,11 +1763,21 @@ export default function TalentTree({
 
                         <span>
                           {talent.is_hidden
-                            ? 'CONHECIMENTO DESCONHECIDO'
-                            : `NÍVEL ${talent.current_points} / ${talent.max_level}`}
+                            ? (talent.is_supreme ? 'VOCÊ AINDA NÃO TENTOU COMBINAÇÕES O SUFICIENTE PARA DESBLOQUEAR ESTA HABILIDADE' : 'CONHECIMENTO DESCONHECIDO')
+                            : (talent.is_supreme ? `${talent.supreme_stars ?? 2} ESTRELAS · HABILIDADE SUPREMA` : `NÍVEL ${talent.current_points} / ${talent.max_level} · ${talent.points_per_level} PONTO(S)/NÍVEL`)}
                         </span>
 
-                        {!talent.is_hidden && hasRequirements && (
+                        {talent.is_supreme && !talent.is_hidden && (
+                          <div className="supreme-talent-badges">
+                            <span className={`supreme-stars-badge supreme-stars-${talent.supreme_stars ?? 2}`}>{'★'.repeat(talent.supreme_stars ?? 2)} {talent.supreme_stars ?? 2} ESTRELAS</span>
+                            {talent.is_hidden
+                              ? <span className="supreme-locked-badge">BLOQUEADA</span>
+                              : <span className="supreme-unlocked-badge">DESBLOQUEADA</span>}
+                            {!talent.is_hidden && talent.requirements_met === true && <span className="supreme-requirements-badge" style={{ background: '#e4f4e9', borderColor: '#a9d8b7', color: '#287447' }}>PRÉ-REQUISITOS ALCANÇADOS</span>}
+                            {!talent.is_hidden && talent.requirements_met === false && <span className="supreme-requirements-badge">PRÉ-REQUISITOS NÃO ALCANÇADOS</span>}
+                          </div>
+                        )}
+                        {!talent.is_hidden && !talent.is_supreme && hasRequirements && (
                           <span
                             className="talent-requirement-badge"
                             style={requirementBadgeStyle}
@@ -1595,7 +1848,7 @@ export default function TalentTree({
                         marginTop: '12px',
                       }}
                     >
-                      {!talent.is_hidden && (
+                      {!talent.is_hidden && !talent.is_supreme && (
                         <>
                           <button
                             type="button"
@@ -1628,10 +1881,10 @@ export default function TalentTree({
                           <button
                             type="button"
                             aria-label={`Adicionar um ponto a ${talent.name}`}
-                            title="Adicionar um ponto"
+                            title={`Evoluir nível (custa ${talent.points_per_level} pontos)`}
                             disabled={
                               isAnyTalentUpdating ||
-                              totalAvailable <= 0 ||
+                              totalAvailable < talent.points_per_level ||
                               talent.current_points >= talent.max_level
                             }
                             onClick={() =>
@@ -1642,12 +1895,14 @@ export default function TalentTree({
                               opacity:
                                 isAnyTalentUpdating ||
                                   totalAvailable <= 0 ||
+                                  totalAvailable < talent.points_per_level ||
                                   talent.current_points >= talent.max_level
                                   ? 0.45
                                   : 1,
                               cursor:
                                 isAnyTalentUpdating ||
                                   totalAvailable <= 0 ||
+                                  totalAvailable < talent.points_per_level ||
                                   talent.current_points >= talent.max_level
                                   ? 'not-allowed'
                                   : 'pointer',
@@ -1698,13 +1953,9 @@ export default function TalentTree({
                         </>
                       )}
 
-                      <button
+                      {!talent.is_hidden && <button
                         type="button"
-                        aria-label={
-                          talent.is_hidden
-                            ? 'Consultar conhecimento'
-                            : `Ver detalhes de ${talent.name}`
-                        }
+                        aria-label={`Ver detalhes de ${talent.name}`}
                         title="Ver detalhes"
                         onClick={() => openTalent(talent)}
                         style={{
@@ -1715,7 +1966,7 @@ export default function TalentTree({
                         }}
                       >
                         <Eye size={15} />
-                      </button>
+                      </button>}
                     </div>
                   </article>
                 )
@@ -1961,24 +2212,25 @@ export default function TalentTree({
                 )}
 
 
-                <label className="talent-form-full">
-                  <span>Nível máximo</span>
-
-                  <input
-                    type="number"
-                    min={1}
-                    max={99}
-                    step={1}
-                    required
-                    value={form.max_level}
-                    onChange={(event) =>
-                      updateForm(
-                        'max_level',
-                        Number(event.target.value),
-                      )
-                    }
-                  />
-                </label>
+                {form.tree_key === 'supremo' ? (
+                  <>
+                    <label><span>Categoria da habilidade suprema</span>
+                      <select value={form.supreme_stars} onChange={(event) => updateForm('supreme_stars', Number(event.target.value) as 2 | 3)}>
+                        <option value={2}>Suprema · 2 estrelas</option><option value={3}>Suprema · 3 estrelas</option>
+                      </select>
+                    </label>
+                    <label><span>Disponibilidade</span>
+                      <select value={form.supreme_unlocked ? 'unlocked' : 'locked'} onChange={(event) => { const unlocked = event.target.value === 'unlocked'; updateForm('supreme_unlocked', unlocked); updateForm('is_hidden', !unlocked) }}>
+                        <option value="locked">Bloqueada</option><option value="unlocked">Desbloqueada</option>
+                      </select>
+                    </label>
+                  </>
+                ) : (
+                  <>
+                    <label><span>Nível máximo</span><input type="number" min={1} max={99} step={1} required value={form.max_level} onChange={(event) => updateForm('max_level', Number(event.target.value))} /></label>
+                    <label><span>Custo por nível (pontos)</span><input type="number" min={1} step={1} required value={form.points_per_level} onChange={(event) => updateForm('points_per_level', Number(event.target.value))} /></label>
+                  </>
+                )}
 
                 <label className="talent-form-full">
                   <span>Descrição mecânica</span>
@@ -1994,7 +2246,7 @@ export default function TalentTree({
                 </label>
               </div>
 
-              <div className="talent-form-flags">
+              {form.tree_key !== 'supremo' && <div className="talent-form-flags">
                 <label>
                   <input
                     type="checkbox"
@@ -2005,7 +2257,7 @@ export default function TalentTree({
                   />
                   Talento oculto
                 </label>
-              </div>
+              </div>}
 
               <div className="talent-prerequisite-section">
                 <div>
@@ -2083,7 +2335,7 @@ export default function TalentTree({
                     </span>
 
                     {form.prerequisites.map((item) => {
-                      const t = allAvailableTalentsForPrereq.find(
+                      const t = allPrerequisiteTalents.find(
                         (candidate) =>
                           candidate.id === item.prerequisite_talent_id,
                       )
@@ -2097,7 +2349,7 @@ export default function TalentTree({
                         >
                           <div className="talent-prerequisite-name">
                             <strong>
-                              {t.is_hidden ? '???' : t.name}
+                              {t.name}
                             </strong>
 
                             <small>{treeName(t.tree_key)}</small>
@@ -2410,8 +2662,8 @@ export default function TalentTree({
                       lineHeight: 1.5,
                     }}
                   >
-                    {deletePoints > 0
-                      ? `${deletePoints} ${deletePoints === 1
+                    {(deletePoints * (deletingTalent?.points_per_level ?? 1)) > 0
+                      ? `${deletePoints * (deletingTalent?.points_per_level ?? 1)} ${(deletePoints * (deletingTalent?.points_per_level ?? 1)) === 1
                         ? 'ponto distribuído será removido'
                         : 'pontos distribuídos serão removidos'
                       } da progressão global.`
@@ -2517,7 +2769,7 @@ export default function TalentTree({
                     font: 'italic 15px Playfair Display, Georgia, serif',
                   }}
                 >
-                  Você não detém desse conhecimento ainda.
+                  {selectedTalent.is_supreme ? 'Você ainda não tentou combinações o suficiente para desbloquear esta habilidade.' : 'Você não detém desse conhecimento ainda.'}
                 </p>
 
                 <button
@@ -2553,7 +2805,7 @@ export default function TalentTree({
                     padding: '14px',
                     border: '1px solid #ece9e1',
                     borderRadius: '8px',
-                    background: '#f7f6f2',
+                    background: selectedTalent.is_supreme ? 'linear-gradient(135deg, #211d2d, #30263c)' : '#f7f6f2',
                   }}
                 >
                   <div className="talent-tree-icon">
@@ -2579,15 +2831,21 @@ export default function TalentTree({
                         letterSpacing: '1px',
                       }}
                     >
-                      NÍVEL ATUAL
+                      {selectedTalent.is_supreme ? 'HABILIDADE SUPREMA' : 'NÍVEL ATUAL'}
                     </span>
 
-                    <strong
-                      style={{ color: '#465a70', fontSize: '17px' }}
-                    >
-                      {selectedTalent.current_points} /{' '}
-                      {selectedTalent.max_level}
+                    <strong style={{ color: selectedTalent.is_supreme ? '#f0d7a2' : '#465a70', fontSize: '17px' }}>
+                      {selectedTalent.is_supreme ? '★'.repeat(selectedTalent.supreme_stars ?? 2) : `${selectedTalent.current_points} / ${selectedTalent.max_level}`}
                     </strong>
+                    {selectedTalent.is_supreme ? (
+                      <span style={{ color: selectedTalent.requirements_met ? '#9ee0b4' : '#e9b0a9', fontSize: '10px', fontWeight: 800 }}>
+                        {selectedTalent.requirements_met ? 'PRÉ-REQUISITOS ALCANÇADOS' : 'PRÉ-REQUISITOS NÃO ALCANÇADOS'}
+                      </span>
+                    ) : (
+                      <span style={{ color: '#8a9298', fontSize: '10px' }}>
+                        CUSTO: {selectedTalent.points_per_level} {selectedTalent.points_per_level === 1 ? 'ponto' : 'pontos'} por nível · MÁXIMO: {selectedTalent.max_level * selectedTalent.points_per_level} pontos
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -2622,6 +2880,12 @@ export default function TalentTree({
                       'Nenhuma descrição cadastrada.'}
                   </p>
                 </section>
+
+                {selectedTalent.is_supreme && (
+                  <p style={{ margin: 0, padding: '12px 14px', borderRadius: 8, background: selectedTalent.requirements_met ? '#e7f5eb' : '#faecea', color: selectedTalent.requirements_met ? '#287447' : '#a34b43', fontSize: 12, fontWeight: 700 }}>
+                    {selectedTalent.requirements_met ? 'Essa habilidade está ativa.' : 'Essa habilidade não está ativa.'}
+                  </p>
+                )}
 
                 {(selectedTalent.prerequisites.length > 0 ||
                   selectedTalent.treeRequirements.length > 0) && (

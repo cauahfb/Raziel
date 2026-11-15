@@ -45,10 +45,13 @@ type Talent = {
   description: string | null
 
   max_level: number
+  points_per_level: number
 
   is_hidden: boolean
 
   is_supreme: boolean
+  supreme_stars: 2 | 3
+  supreme_unlocked: boolean
   analyses_required: number
   analyses_completed: number
   current_points: number
@@ -105,8 +108,11 @@ type TalentForm = {
   description: string
 
   max_level: number
+  points_per_level: number
 
   is_hidden: boolean
+  supreme_stars: 2 | 3
+  supreme_unlocked: boolean
   analyses_required: number
   analyses_completed: number
 
@@ -149,8 +155,11 @@ const emptyForm: TalentForm = {
   description: '',
 
   max_level: 1,
+  points_per_level: 1,
 
   is_hidden: false,
+  supreme_stars: 2,
+  supreme_unlocked: false,
 
   analyses_required: 0,
 
@@ -320,7 +329,7 @@ export default function TalentManagement() {
 
         .select(
 
-          'id, tree_key, name, icon_url, description, max_level, is_hidden, is_supreme, analyses_required, analyses_completed',
+          'id, tree_key, name, icon_url, description, max_level, points_per_level, is_hidden, is_supreme, supreme_stars, supreme_unlocked, analyses_required, analyses_completed',
 
         )
 
@@ -681,8 +690,11 @@ export default function TalentManagement() {
       description: talent.description ?? '',
 
       max_level: talent.max_level,
+      points_per_level: talent.points_per_level ?? 1,
 
       is_hidden: talent.is_hidden,
+      supreme_stars: talent.supreme_stars ?? 2,
+      supreme_unlocked: talent.supreme_unlocked ?? false,
 
       analyses_required: talent.analyses_required ?? 0,
 
@@ -932,7 +944,9 @@ export default function TalentManagement() {
 
     const name = form.name.trim()
 
-    const maxLevel = Number(form.max_level)
+    const isSupreme = form.tree_key === 'supremo'
+    const maxLevel = isSupreme ? 1 : Number(form.max_level)
+    const pointsPerLevel = isSupreme ? 1 : Number(form.points_per_level)
 
     const analysesRequired = Number(form.analyses_required)
 
@@ -1079,10 +1093,13 @@ export default function TalentManagement() {
       description: form.description.trim(),
 
       max_level: maxLevel,
+      points_per_level: pointsPerLevel,
 
-      is_hidden: form.is_hidden,
+      is_hidden: isSupreme ? !form.supreme_unlocked : form.is_hidden,
 
-      is_supreme: form.tree_key === 'supremo',
+      is_supreme: isSupreme,
+      supreme_stars: isSupreme ? form.supreme_stars : 2,
+      supreme_unlocked: isSupreme ? form.supreme_unlocked : false,
 
       analyses_required: tracksAnalyses ? analysesRequired : 0,
 
@@ -1139,6 +1156,13 @@ export default function TalentManagement() {
 
 
     const talentId = result.data.id
+
+    if (isSupreme) {
+      const { error: refreshError } = await supabase.rpc('refresh_automatic_compendium_unlocks')
+      if (refreshError) {
+        console.error('Não foi possível atualizar a revelação da Habilidade Suprema:', refreshError.message)
+      }
+    }
 
 
 
@@ -1543,6 +1567,26 @@ export default function TalentManagement() {
 
 
         <button
+          type="button"
+          className="talent-secondary-button"
+          onClick={() => {
+            const resetApexNoticeStorage = (storage: Storage) => {
+              const keysToRemove: string[] = []
+              for (let index = 0; index < storage.length; index += 1) {
+                const key = storage.key(index)
+                if (key?.startsWith('raziel:seen-apex-unlock:')) keysToRemove.push(key)
+              }
+              keysToRemove.forEach((key) => storage.removeItem(key))
+            }
+            resetApexNoticeStorage(window.localStorage)
+            resetApexNoticeStorage(window.sessionStorage)
+            window.alert('A apresentação dos alertas de todos os Ápices foi resetada neste navegador. Cada mensagem poderá aparecer novamente quando sua respectiva árvore for aberta.')
+          }}
+        >
+          Resetar alertas de todos os Ápices
+        </button>
+
+        <button
 
           type="button"
 
@@ -1762,17 +1806,9 @@ export default function TalentManagement() {
 
 
                   <span>
-
-                    {treeName(talent.tree_key)} · Máx.{' '}
-
-                    {talent.max_level}{' '}
-
-                    {talent.max_level === 1 ? 'nível' : 'níveis'} ·{' '}
-
-                    {prerequisiteCount} pré-requisitos ·{' '}
-
-                    {treeRequirementCount} requisitos por árvore
-
+                    {talent.is_supreme
+                      ? `Talento Supremo · ${talent.supreme_stars ?? 2} estrelas · ${talent.supreme_unlocked ? 'Desbloqueada' : 'Bloqueada'}`
+                      : `${treeName(talent.tree_key)} · Máx. ${talent.max_level} ${talent.max_level === 1 ? 'nível' : 'níveis'}`} · {prerequisiteCount} pré-requisitos · {treeRequirementCount} requisitos por árvore
                   </span>
 
 
@@ -2047,7 +2083,7 @@ export default function TalentManagement() {
 
                     onChange={(event) =>
 
-                      updateForm('tree_key', event.target.value)
+                      setForm((current) => ({ ...current, tree_key: event.target.value, ...(event.target.value === 'supremo' ? { is_hidden: !current.supreme_unlocked } : {}) }))
 
                     }
 
@@ -2173,20 +2209,37 @@ export default function TalentManagement() {
                   </>
                 )}
 
-                <label className="talent-form-full">
-                  <span>Nível máximo</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={99}
-                    step={1}
-                    required
-                    value={form.max_level}
-                    onChange={(event) =>
-                      updateForm('max_level', Number(event.target.value))
-                    }
-                  />
-                </label>
+                {form.tree_key === 'supremo' ? (
+                  <>
+                    <label>
+                      <span>Categoria da habilidade suprema</span>
+                      <select value={form.supreme_stars} onChange={(event) => updateForm('supreme_stars', Number(event.target.value) as 2 | 3)}>
+                        <option value={2}>Suprema · 2 estrelas</option>
+                        <option value={3}>Suprema · 3 estrelas</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Disponibilidade</span>
+                      <select value={form.supreme_unlocked ? 'unlocked' : 'locked'} onChange={(event) => { const unlocked = event.target.value === 'unlocked'; updateForm('supreme_unlocked', unlocked); updateForm('is_hidden', !unlocked) }}>
+                        <option value="locked">Bloqueada</option>
+                        <option value="unlocked">Desbloqueada</option>
+                      </select>
+                    </label>
+                  </>
+                ) : (
+                  <>
+                    <label>
+                      <span>Nível máximo</span>
+                      <input type="number" min={1} max={99} step={1} required value={form.max_level}
+                        onChange={(event) => updateForm('max_level', Number(event.target.value))} />
+                    </label>
+                    <label>
+                      <span>Custo por nível (pontos)</span>
+                      <input type="number" min={1} step={1} required value={form.points_per_level}
+                        onChange={(event) => updateForm('points_per_level', Number(event.target.value))} />
+                    </label>
+                  </>
+                )}
 
                 <label className="talent-form-full">
 
@@ -2216,7 +2269,7 @@ export default function TalentManagement() {
 
 
 
-              <div className="talent-form-flags">
+              {form.tree_key !== 'supremo' && <div className="talent-form-flags">
 
                 <label>
 
@@ -2238,7 +2291,7 @@ export default function TalentManagement() {
 
                 </label>
 
-              </div>
+              </div>}
 
 
 

@@ -41,19 +41,20 @@ export default function SupremeTalents({ isAdmin, totalAvailable, totalDistribut
         return
       }
 
+      // Recalcula a revelação no banco antes de verificar o acesso, garantindo
+      // que supreme_unlocked=true também resulte em is_hidden=false.
+      const { error: refreshError } = await supabase.rpc('refresh_automatic_compendium_unlocks')
+      if (refreshError) {
+        console.error('Erro ao sincronizar a revelação das Habilidades Supremas:', refreshError.message)
+      }
+
       let query = supabase
-        .from('talents_safe')
-        .select('id')
+        .from('talents_player_safe')
+        .select('id, is_hidden, supreme_unlocked')
         .eq('tree_key', 'supremo')
         .eq('is_supreme', true)
 
-      // A existência de um registro não significa que ele foi desbloqueado.
-      // Para usuários comuns, somente talentos revelados (is_hidden = false)
-      // podem liberar a entrada na Árvore Suprema. Administradores continuam
-      // podendo visualizar e gerenciar a árvore inteira.
-      if (!isAdmin) {
-        query = query.eq('is_hidden', false)
-      }
+      if (!isAdmin) query = query.eq('supreme_unlocked', true)
 
       const { data, error } = await query
 
@@ -95,7 +96,7 @@ export default function SupremeTalents({ isAdmin, totalAvailable, totalDistribut
 
   return (
     <TalentTree
-      key={reloadKey}
+      key={`${reloadKey}-${refreshKey}`}
       tree={supremeTree}
       isAdmin={isAdmin}
       totalAvailable={totalAvailable}
@@ -104,7 +105,6 @@ export default function SupremeTalents({ isAdmin, totalAvailable, totalDistribut
       onFocusTalentHandled={onFocusTalentHandled}
       onProgressChanged={(treeId, previousPoints, updatedPoints) => {
         onProgressChanged(treeId, previousPoints, updatedPoints)
-        setReloadKey((value) => value + 1)
       }}
       onTalentDeleted={(treeId, removedPoints, wasActive) => {
         onTalentDeleted(treeId, removedPoints, wasActive)

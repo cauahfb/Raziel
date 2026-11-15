@@ -55,3 +55,13 @@ O objetivo do Raziel Compendium é oferecer um ambiente centralizado, intuitivo 
 ---
 
 <sub>Raziel Compendium · Projeto independente · Desenvolvido com React, TypeScript e Supabase.</sub>
+
+## Atualização: regras de desbloqueio dos Ápices e Habilidades Supremas
+
+Depois de aplicar as migrations anteriores do projeto, execute no SQL Editor do Supabase o arquivo `supabase_migration_apices_supremas_v2.sql`. Ele cria os estados independentes `is_unlocked` e `is_hidden` dos Ápices, disponibiliza a view segura `talent_tree_apices_safe_v2`, corrige a validação do Ápice da aba Suprema e atualiza a função de distribuição de pontos para validar as condições também no banco.
+
+A atualização do frontend utiliza essa nova view para os Ápices. Não remova a view antiga `talent_tree_apices_safe`, pois ela ainda é utilizada pelo carregamento geral de progressão.
+
+## Correções pós-testes de Supremas e Ápices
+
+Esta versão inclui `supabase_migration_correcao_apices_supremas.sql`. Execute esse arquivo no SQL Editor do Supabase **depois** das migrations anteriores de custo por nível, Habilidades Supremas e Ápices v2. A migration corrige o cálculo ponderado e isolado por árvore, sincroniza a revelação das Habilidades Supremas, desbloqueia automaticamente Ápices comuns ao atingir os pontos exigidos e reserva o alerta narrativo ao Ápice Supremo.
