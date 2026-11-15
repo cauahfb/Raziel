@@ -1482,8 +1482,20 @@ export default function TalentTree({
       </section>
 
       {apexUnlockNotice && apex && apex.is_unlocked && !apex.is_hidden && (
-        <div className="talent-modal-backdrop" role="presentation">
+        <div className={`talent-modal-backdrop${tree.id === 'supremo' ? ' tree-apex-supreme-backdrop' : ''}`} role="presentation">
           <section className={`talent-modal tree-apex-modal${tree.id === 'supremo' ? ' tree-apex-supreme-notice' : ''}`} role="dialog" aria-modal="true" aria-labelledby="apex-unlock-notice-title" style={{ textAlign: 'center' }}>
+            {tree.id === 'supremo' && (
+              <div className="absolute-knowledge-aura" aria-hidden="true">
+                <span className="absolute-knowledge-spark spark-1" />
+                <span className="absolute-knowledge-spark spark-2" />
+                <span className="absolute-knowledge-spark spark-3" />
+                <span className="absolute-knowledge-spark spark-4" />
+                <span className="absolute-knowledge-spark spark-5" />
+                <span className="absolute-knowledge-spark spark-6" />
+                <span className="absolute-knowledge-spark spark-7" />
+                <span className="absolute-knowledge-spark spark-8" />
+              </div>
+            )}
             <div className="tree-apex-modal-icon">{apex.icon_url ? <img src={apex.icon_url} alt="" /> : <Crown size={30} />}</div>
             {tree.id === 'supremo' ? (
               <>

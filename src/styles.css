@@ -3967,3 +3967,286 @@ section.tree-summary.supreme-tree-apex > div.tree-apex-summary {
 @media (max-width: 680px) {
   .dashboard-apex-active { padding: 5px 7px; font-size: 8px; }
 }
+
+
+/* =========================================
+   RAZIEL — REVELAÇÃO DO CONHECIMENTO ABSOLUTO
+   Camada cinematográfica adicional, exclusiva
+   do desbloqueio do Ápice Supremo.
+========================================= */
+
+.tree-apex-supreme-backdrop {
+  isolation: isolate;
+  background:
+    radial-gradient(ellipse at 50% 48%, rgba(174, 126, 57, .22) 0%, rgba(75, 49, 65, .28) 28%, rgba(19, 17, 28, .78) 62%, rgba(5, 7, 14, .97) 100%),
+    rgba(5, 7, 14, .94);
+  backdrop-filter: blur(12px) saturate(1.12);
+}
+
+.tree-apex-supreme-backdrop::before {
+  opacity: .95;
+  background:
+    repeating-conic-gradient(
+      from 0deg at 50% 50%,
+      transparent 0deg 7deg,
+      rgba(255, 226, 166, .075) 7.15deg 7.45deg,
+      transparent 7.7deg 15deg
+    ),
+    radial-gradient(ellipse at center, rgba(218, 176, 102, .12), transparent 54%);
+  animation: absoluteKnowledgeRays 42s linear infinite;
+}
+
+.tree-apex-supreme-backdrop::after {
+  opacity: .9;
+  background-image:
+    radial-gradient(2px 2px at 12% 22%, rgba(255, 241, 207, .95) 50%, transparent 100%),
+    radial-gradient(2px 2px at 82% 18%, rgba(255, 235, 190, .9) 50%, transparent 100%),
+    radial-gradient(2px 2px at 74% 78%, rgba(255, 215, 145, .85) 50%, transparent 100%),
+    radial-gradient(2px 2px at 23% 81%, rgba(255, 235, 190, .9) 50%, transparent 100%),
+    radial-gradient(2px 2px at 51% 12%, rgba(255, 247, 220, .95) 50%, transparent 100%),
+    radial-gradient(1px 1px at 39% 67%, rgba(255, 226, 166, .85) 50%, transparent 100%),
+    radial-gradient(1px 1px at 91% 54%, rgba(255, 226, 166, .8) 50%, transparent 100%);
+  animation: absoluteKnowledgeStarfield 8s ease-in-out infinite alternate;
+}
+
+.tree-apex-supreme-notice {
+  position: relative;
+  isolation: isolate;
+  overflow: visible;
+  border-color: rgba(239, 207, 139, .88);
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(176, 128, 65, .34), transparent 49%),
+    radial-gradient(ellipse at 50% 100%, rgba(115, 76, 54, .16), transparent 55%),
+    linear-gradient(155deg, #17141d 0%, #211a25 47%, #10121b 100%);
+  box-shadow:
+    0 0 0 1px rgba(255, 225, 164, .22),
+    0 0 0 7px rgba(205, 164, 91, .045),
+    0 0 42px rgba(226, 183, 103, .28),
+    0 0 105px rgba(184, 130, 56, .2),
+    0 35px 115px rgba(0, 0, 0, .76),
+    inset 0 0 72px rgba(0, 0, 0, .34);
+  animation:
+    absoluteKnowledgeReveal .95s cubic-bezier(.16, 1, .3, 1) both,
+    absoluteKnowledgeCardRadiance 5s ease-in-out 1s infinite;
+}
+
+.tree-apex-supreme-notice::before {
+  inset: 9px;
+  border-color: rgba(238, 205, 139, .3);
+  box-shadow: inset 0 0 28px rgba(220, 179, 105, .035);
+}
+
+.tree-apex-supreme-notice::after {
+  left: 10%;
+  width: 80%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 246, 220, .95) 24%, #e7c27c 50%, rgba(255, 246, 220, .95) 76%, transparent);
+  box-shadow: 0 0 14px 3px rgba(238, 199, 120, .42), 0 0 34px 7px rgba(214, 164, 77, .18);
+  animation: absoluteKnowledgeTopline 3.4s ease-in-out infinite;
+}
+
+.absolute-knowledge-aura {
+  position: absolute;
+  z-index: -1;
+  inset: -48px;
+  overflow: visible;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.absolute-knowledge-aura::before,
+.absolute-knowledge-aura::after {
+  position: absolute;
+  content: "";
+  pointer-events: none;
+  border-radius: 50%;
+}
+
+.absolute-knowledge-aura::before {
+  inset: 4%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    rgba(239, 202, 128, .05) 28deg,
+    rgba(255, 235, 188, .42) 43deg,
+    transparent 58deg,
+    transparent 112deg,
+    rgba(232, 190, 111, .3) 132deg,
+    transparent 151deg,
+    transparent 220deg,
+    rgba(255, 229, 172, .38) 243deg,
+    transparent 260deg,
+    transparent 315deg,
+    rgba(239, 202, 128, .22) 337deg,
+    transparent 350deg
+  );
+  filter: blur(13px);
+  opacity: .82;
+  animation: absoluteKnowledgeHaloRotate 18s linear infinite;
+}
+
+.absolute-knowledge-aura::after {
+  inset: 13%;
+  border: 1px solid rgba(237, 199, 122, .22);
+  box-shadow:
+    0 0 20px rgba(225, 179, 95, .12),
+    inset 0 0 24px rgba(225, 179, 95, .08);
+  animation: absoluteKnowledgeHaloBreathe 4.8s ease-in-out infinite;
+}
+
+.absolute-knowledge-spark {
+  position: absolute;
+  z-index: 2;
+  display: block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #fff3cf;
+  box-shadow:
+    0 0 5px 2px rgba(255, 239, 195, .8),
+    0 0 13px 5px rgba(232, 184, 95, .48),
+    0 0 26px 8px rgba(212, 157, 65, .2);
+  opacity: 0;
+  animation: absoluteKnowledgeSpark 3.8s ease-in-out infinite;
+}
+
+.absolute-knowledge-spark.spark-1 { top: 7%; left: 25%; animation-delay: -.3s; }
+.absolute-knowledge-spark.spark-2 { top: 18%; right: 8%; animation-delay: -1.4s; }
+.absolute-knowledge-spark.spark-3 { top: 51%; right: 1%; animation-delay: -2.2s; }
+.absolute-knowledge-spark.spark-4 { bottom: 10%; right: 24%; animation-delay: -.8s; }
+.absolute-knowledge-spark.spark-5 { bottom: 5%; left: 34%; animation-delay: -2.8s; }
+.absolute-knowledge-spark.spark-6 { bottom: 27%; left: 4%; animation-delay: -1.8s; }
+.absolute-knowledge-spark.spark-7 { top: 32%; left: 0; animation-delay: -.6s; }
+.absolute-knowledge-spark.spark-8 { top: 2%; right: 34%; animation-delay: -3.1s; }
+
+.tree-apex-supreme-notice > :not(.absolute-knowledge-aura) {
+  position: relative;
+  z-index: 1;
+}
+
+.tree-apex-supreme-notice .tree-apex-modal-icon {
+  width: 112px;
+  height: 112px;
+  margin-bottom: 32px;
+  border-color: rgba(255, 226, 164, .96);
+  background:
+    radial-gradient(circle at 50% 38%, rgba(255, 235, 187, .32), transparent 43%),
+    radial-gradient(circle, #6d512f 0%, #342936 61%, #171720 100%);
+  box-shadow:
+    0 0 0 1px rgba(255, 232, 184, .34),
+    0 0 0 9px rgba(217, 177, 101, .08),
+    0 0 32px rgba(255, 215, 139, .48),
+    0 0 68px rgba(214, 164, 77, .28),
+    inset 0 0 28px rgba(255, 231, 176, .23);
+  animation: absoluteKnowledgePulse 3.2s ease-in-out infinite;
+}
+
+.tree-apex-supreme-notice .tree-apex-modal-icon svg {
+  width: 49px;
+  height: 49px;
+  filter:
+    drop-shadow(0 0 5px rgba(255, 244, 214, .95))
+    drop-shadow(0 0 15px rgba(255, 208, 119, .72));
+}
+
+.tree-apex-supreme-notice .eyebrow {
+  color: #f0d18f;
+  letter-spacing: .42em;
+  text-shadow:
+    0 0 9px rgba(255, 220, 153, .55),
+    0 0 24px rgba(225, 173, 88, .32);
+}
+
+.tree-apex-supreme-notice h2 {
+  color: #fff5dc;
+  text-shadow:
+    0 2px 5px rgba(0, 0, 0, .5),
+    0 0 22px rgba(239, 203, 135, .26),
+    0 0 48px rgba(222, 172, 89, .15);
+}
+
+.tree-apex-supreme-notice p {
+  color: #e4d2b0;
+  text-shadow: 0 0 16px rgba(222, 185, 121, .12);
+}
+
+.tree-apex-supreme-notice .talent-primary-button {
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px rgba(255, 239, 203, .22),
+    0 5px 24px rgba(194, 151, 78, .3),
+    0 0 32px rgba(222, 177, 94, .17),
+    inset 0 1px 0 rgba(255, 255, 255, .62);
+}
+
+.tree-apex-supreme-notice .talent-primary-button::before {
+  position: absolute;
+  top: -60%;
+  left: -45%;
+  width: 34%;
+  height: 220%;
+  content: "";
+  transform: rotate(22deg);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .58), transparent);
+  animation: absoluteKnowledgeButtonShimmer 4.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes absoluteKnowledgeStarfield {
+  from { opacity: .42; }
+  to { opacity: .95; }
+}
+@keyframes absoluteKnowledgeHaloRotate {
+  to { transform: rotate(360deg); }
+}
+@keyframes absoluteKnowledgeHaloBreathe {
+  0%, 100% { transform: scale(.97); opacity: .45; }
+  50% { transform: scale(1.035); opacity: .9; }
+}
+@keyframes absoluteKnowledgeSpark {
+  0%, 100% { opacity: 0; transform: scale(.55) translateY(5px); }
+  35%, 65% { opacity: .95; transform: scale(1.25) translateY(-3px); }
+}
+@keyframes absoluteKnowledgeCardRadiance {
+  0%, 100% {
+    box-shadow: 0 0 0 1px rgba(255,225,164,.2), 0 0 42px rgba(226,183,103,.23), 0 0 100px rgba(184,130,56,.16), 0 35px 115px rgba(0,0,0,.76), inset 0 0 72px rgba(0,0,0,.34);
+  }
+  50% {
+    box-shadow: 0 0 0 1px rgba(255,235,190,.38), 0 0 58px rgba(246,204,126,.38), 0 0 132px rgba(212,157,65,.25), 0 35px 115px rgba(0,0,0,.76), inset 0 0 72px rgba(0,0,0,.34);
+  }
+}
+@keyframes absoluteKnowledgeTopline {
+  0%, 100% { opacity: .65; filter: brightness(.9); }
+  50% { opacity: 1; filter: brightness(1.4); }
+}
+@keyframes absoluteKnowledgeButtonShimmer {
+  0%, 28% { left: -45%; opacity: 0; }
+  42% { opacity: .8; }
+  58%, 100% { left: 125%; opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tree-apex-supreme-backdrop,
+  .tree-apex-supreme-backdrop::before,
+  .tree-apex-supreme-backdrop::after,
+  .tree-apex-supreme-notice,
+  .tree-apex-supreme-notice::after,
+  .tree-apex-supreme-notice .tree-apex-modal-icon,
+  .absolute-knowledge-aura::before,
+  .absolute-knowledge-aura::after,
+  .absolute-knowledge-spark,
+  .tree-apex-supreme-notice .talent-primary-button::before {
+    animation: none !important;
+  }
+}
+
+@media (max-width: 520px) {
+  .absolute-knowledge-aura { inset: -30px; }
+  .tree-apex-supreme-notice .tree-apex-modal-icon {
+    width: 94px;
+    height: 94px;
+    margin-bottom: 27px;
+  }
+}
+
