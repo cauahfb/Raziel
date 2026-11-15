@@ -18,6 +18,7 @@ type DashboardProps = {
   trees: Tree[]
   activeTalentsByTree: Record<string, ActiveTalent[]>
   activeSupremeTalents: ActiveTalent[]
+  activeApexTreeKeys: string[]
   totalAvailable: number
   totalDistributed: number
   characterLevel: number
@@ -32,6 +33,7 @@ export default function Dashboard({
   trees,
   activeTalentsByTree,
   activeSupremeTalents,
+  activeApexTreeKeys,
   isAdmin,
   totalAvailable,
   totalDistributed,
@@ -371,6 +373,7 @@ export default function Dashboard({
         {trees.map((tree) => {
           const Icon = tree.icon
           const activeTalents = activeTalentsByTree[tree.id] ?? []
+          const apexIsActive = activeApexTreeKeys.includes(tree.id)
           return (
             <article className="dashboard-tree-card" key={tree.id}>
               <button type="button" className="dashboard-tree-heading" onClick={() => onNavigate(tree.id)}>
@@ -378,6 +381,7 @@ export default function Dashboard({
                 <span className="dashboard-tree-title"><strong>{tree.name}</strong><small>{tree.subtitle}</small></span>
                 <span className="dashboard-tree-metrics"><strong>{activeTalents.length}</strong><small>{activeTalents.length === 1 ? 'talento ativo' : 'talentos ativos'}</small></span>
                 <span className="dashboard-tree-points"><strong>{tree.points}</strong><small>pontos gastos</small></span>
+                {apexIsActive && <span className="dashboard-apex-active" title="Ápice desbloqueado e com ponto distribuído"><Sparkles size={13} /><span>ÁPICE ATIVO</span></span>}
                 <ArrowUpRight size={16} className="tree-arrow" />
               </button>
               {activeTalents.length > 0 ? (

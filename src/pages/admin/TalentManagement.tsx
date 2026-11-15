@@ -52,6 +52,7 @@ type Talent = {
   is_supreme: boolean
   supreme_stars: 2 | 3
   supreme_unlocked: boolean
+  is_manually_locked: boolean
   analyses_required: number
   analyses_completed: number
   current_points: number
@@ -113,6 +114,7 @@ type TalentForm = {
   is_hidden: boolean
   supreme_stars: 2 | 3
   supreme_unlocked: boolean
+  is_manually_locked: boolean
   analyses_required: number
   analyses_completed: number
 
@@ -160,6 +162,7 @@ const emptyForm: TalentForm = {
   is_hidden: false,
   supreme_stars: 2,
   supreme_unlocked: false,
+  is_manually_locked: false,
 
   analyses_required: 0,
 
@@ -329,7 +332,7 @@ export default function TalentManagement() {
 
         .select(
 
-          'id, tree_key, name, icon_url, description, max_level, points_per_level, is_hidden, is_supreme, supreme_stars, supreme_unlocked, analyses_required, analyses_completed',
+          'id, tree_key, name, icon_url, description, max_level, points_per_level, is_hidden, is_supreme, supreme_stars, supreme_unlocked, is_manually_locked, analyses_required, analyses_completed',
 
         )
 
@@ -695,6 +698,7 @@ export default function TalentManagement() {
       is_hidden: talent.is_hidden,
       supreme_stars: talent.supreme_stars ?? 2,
       supreme_unlocked: talent.supreme_unlocked ?? false,
+      is_manually_locked: talent.is_manually_locked ?? false,
 
       analyses_required: talent.analyses_required ?? 0,
 
@@ -1100,6 +1104,7 @@ export default function TalentManagement() {
       is_supreme: isSupreme,
       supreme_stars: isSupreme ? form.supreme_stars : 2,
       supreme_unlocked: isSupreme ? form.supreme_unlocked : false,
+      is_manually_locked: isSupreme ? form.is_manually_locked : false,
 
       analyses_required: tracksAnalyses ? analysesRequired : 0,
 
@@ -1565,26 +1570,6 @@ export default function TalentManagement() {
         </div>
 
 
-
-        <button
-          type="button"
-          className="talent-secondary-button"
-          onClick={() => {
-            const resetApexNoticeStorage = (storage: Storage) => {
-              const keysToRemove: string[] = []
-              for (let index = 0; index < storage.length; index += 1) {
-                const key = storage.key(index)
-                if (key?.startsWith('raziel:seen-apex-unlock:')) keysToRemove.push(key)
-              }
-              keysToRemove.forEach((key) => storage.removeItem(key))
-            }
-            resetApexNoticeStorage(window.localStorage)
-            resetApexNoticeStorage(window.sessionStorage)
-            window.alert('A apresentação dos alertas de todos os Ápices foi resetada neste navegador. Cada mensagem poderá aparecer novamente quando sua respectiva árvore for aberta.')
-          }}
-        >
-          Resetar alertas de todos os Ápices
-        </button>
 
         <button
 
@@ -2220,7 +2205,7 @@ export default function TalentManagement() {
                     </label>
                     <label>
                       <span>Disponibilidade</span>
-                      <select value={form.supreme_unlocked ? 'unlocked' : 'locked'} onChange={(event) => { const unlocked = event.target.value === 'unlocked'; updateForm('supreme_unlocked', unlocked); updateForm('is_hidden', !unlocked) }}>
+                      <select value={form.supreme_unlocked ? 'unlocked' : 'locked'} onChange={(event) => { const unlocked = event.target.value === 'unlocked'; updateForm('supreme_unlocked', unlocked); updateForm('is_hidden', !unlocked); updateForm('is_manually_locked', !unlocked) }}>
                         <option value="locked">Bloqueada</option>
                         <option value="unlocked">Desbloqueada</option>
                       </select>

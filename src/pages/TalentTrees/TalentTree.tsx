@@ -34,6 +34,7 @@ type Talent = {
   is_supreme: boolean
   supreme_stars: 2 | 3
   supreme_unlocked: boolean
+  is_manually_locked?: boolean
   requirements_met?: boolean
   sort_order: number
   analyses_required: number
@@ -73,6 +74,7 @@ type TalentForm = {
   is_hidden: boolean
   supreme_stars: 2 | 3
   supreme_unlocked: boolean
+  is_manually_locked: boolean
   analyses_required: number
   analyses_completed: number
   prerequisites: Array<{
@@ -106,6 +108,7 @@ type TreeApex = {
   is_revealed: boolean
   is_unlocked: boolean
   is_hidden: boolean
+  is_manually_locked: boolean
   current_points: number
 }
 
@@ -140,6 +143,7 @@ const emptyForm: TalentForm = {
   is_hidden: false,
   supreme_stars: 2,
   supreme_unlocked: false,
+  is_manually_locked: false,
   analyses_required: 0,
   analyses_completed: 0,
   prerequisites: [],
@@ -238,7 +242,7 @@ export default function TalentTree({
   const [apexUnlockNotice, setApexUnlockNotice] = useState(false)
   const [apexSaving, setApexSaving] = useState(false)
   const apexUnlockInFlight = useRef(false)
-  const [apexForm, setApexForm] = useState({ name: '', icon_url: '', required_points: 0, description: '', is_revealed: false, is_unlocked: false, is_hidden: true })
+  const [apexForm, setApexForm] = useState({ name: '', icon_url: '', required_points: 0, description: '', is_revealed: false, is_unlocked: false, is_hidden: true, is_manually_locked: false })
 
   const [modalOpen, setModalOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -383,7 +387,7 @@ export default function TalentTree({
       if (isAdmin && loadedApex) {
         const { data: rawApex, error: rawApexError } = await supabase
           .from('talent_tree_apices')
-          .select('name, icon_url, description, required_points, is_hidden, is_unlocked, is_revealed')
+          .select('name, icon_url, description, required_points, is_hidden, is_unlocked, is_revealed, is_manually_locked')
           .eq('tree_key', tree.id)
           .maybeSingle()
         if (cancelled) return
@@ -395,7 +399,7 @@ export default function TalentTree({
       }
       setApex(loadedApex)
       if (loadedApex) {
-        setApexForm({ name: loadedApex.name, icon_url: loadedApex.icon_url ?? '', required_points: Number(loadedApex.required_points ?? 0), description: loadedApex.description ?? '', is_revealed: Boolean(loadedApex.is_revealed), is_unlocked: Boolean(loadedApex.is_unlocked), is_hidden: Boolean(loadedApex.is_hidden) })
+        setApexForm({ name: loadedApex.name, icon_url: loadedApex.icon_url ?? '', required_points: Number(loadedApex.required_points ?? 0), description: loadedApex.description ?? '', is_revealed: Boolean(loadedApex.is_revealed), is_unlocked: Boolean(loadedApex.is_unlocked), is_hidden: Boolean(loadedApex.is_hidden), is_manually_locked: Boolean(loadedApex.is_manually_locked) })
       }
 
       if (progressResult.error) {
@@ -629,8 +633,15 @@ export default function TalentTree({
 
     onProgressChanged(tree.id, previousCost, updatedCost)
 
-    // Recarrega o estado do Ápice após a progressão; a elegibilidade é calculada
-    // separadamente do estado administrativo de desbloqueio.
+    // Recalcula os desbloqueios no banco imediatamente após qualquer mudança
+    // de pontos. Isso garante que um Ápice ainda oculto seja revelado assim que
+    // seus requisitos forem alcançados, sem depender de reabrir a árvore.
+    const { error: unlockRefreshError } = await supabase.rpc('refresh_automatic_compendium_unlocks')
+    if (unlockRefreshError) {
+      console.error('Não foi possível recalcular os desbloqueios automáticos:', unlockRefreshError.message)
+    }
+
+    // Recarrega o estado do Ápice após a sincronização.
     if (apex) {
       const { data: refreshedApex } = await supabase.rpc(
         'get_talent_tree_apex_for_player',
@@ -662,36 +673,65 @@ export default function TalentTree({
 
   async function saveApex() {
     if (!supabase || !isAdmin) return
-    if (!apexForm.name.trim()) { setProgressMessage('Informe um nome para o Ápice.'); return }
+    let apexName = apexForm.name.trim()
+    if (!apexName || apexName === '???') {
+      const { data: originalApex, error: originalApexError } = await supabase
+        .from('talent_tree_apices')
+        .select('name')
+        .eq('tree_key', tree.id)
+        .maybeSingle()
+      if (originalApexError || !originalApex?.name || originalApex.name === '???') {
+        setProgressMessage('Não foi possível recuperar o nome original do Ápice. Nenhuma alteração foi salva.')
+        return
+      }
+      apexName = originalApex.name
+    }
     if (tree.id !== 'supremo' && (!Number.isInteger(apexForm.required_points) || apexForm.required_points < 0)) { setProgressMessage('A quantidade de pontos deve ser um inteiro igual ou maior que zero.'); return }
     setApexSaving(true)
     const { error } = await supabase.from('talent_tree_apices').upsert({
-      tree_key: tree.id, name: apexForm.name.trim(), icon_url: apexForm.icon_url.trim() || null,
+      tree_key: tree.id, name: apexName, icon_url: apexForm.icon_url.trim() || null,
       required_points: tree.id === 'supremo' ? 0 : apexForm.required_points,
       description: apexForm.description.trim(),
-      is_revealed: !apexForm.is_hidden,
-      is_unlocked: tree.id === 'supremo' ? Boolean(apex?.is_unlocked || supremeApexEligible) : Boolean(apex?.is_unlocked),
-      is_hidden: apexForm.is_hidden && !supremeApexEligible,
+      is_revealed: !apexForm.is_hidden && apexForm.is_unlocked,
+      is_unlocked: Boolean(apexForm.is_unlocked),
+      is_manually_locked: Boolean(apexForm.is_manually_locked),
+      is_hidden: Boolean(apexForm.is_hidden || !apexForm.is_unlocked),
     }, { onConflict: 'tree_key' })
     if (error) { setProgressMessage(error.message || 'Não foi possível salvar o Ápice.'); setApexSaving(false); return }
     const { data, error: reloadError } = await supabase.rpc('get_talent_tree_apex_for_player', { p_tree_key: tree.id })
     if (reloadError) setProgressMessage(reloadError.message)
     const savedApex = data as TreeApex | null
     if (savedApex && !apex?.is_unlocked && savedApex.is_unlocked) notifyApexUnlockOnce(savedApex)
-    setApex(savedApex)
+    setApex(savedApex ? { ...savedApex, is_manually_locked: Boolean(apexForm.is_manually_locked) } : null)
     setApexSaving(false)
     setApexEditorOpen(false)
   }
 
-  function openApexEditor() {
+  async function openApexEditor() {
+    let sourceApex = apex
+    // O nome real vem sempre da tabela administrativa, nunca da view pública
+    // que pode mascarar Ápices ocultos como "???".
+    if (supabase && isAdmin) {
+      const { data: rawApex, error: rawApexError } = await supabase
+        .from('talent_tree_apices')
+        .select('name, icon_url, description, required_points, is_hidden, is_unlocked, is_revealed, is_manually_locked')
+        .eq('tree_key', tree.id)
+        .maybeSingle()
+      if (rawApexError) {
+        setProgressMessage(`Não foi possível carregar os dados originais do Ápice: ${rawApexError.message}`)
+      } else if (rawApex) {
+        sourceApex = { ...(sourceApex ?? {} as TreeApex), ...rawApex } as TreeApex
+      }
+    }
     setApexForm({
-      name: apex?.name && apex.name !== '???' ? apex.name : '',
-      icon_url: apex?.icon_url ?? '',
-      required_points: Number(apex?.required_points ?? 0),
-      description: apex?.description ?? '',
-      is_revealed: Boolean(apex?.is_revealed),
-      is_unlocked: Boolean(apex?.is_unlocked),
-      is_hidden: apex ? Boolean(apex.is_hidden) : true,
+      name: sourceApex?.name && sourceApex.name !== '???' ? sourceApex.name : '',
+      icon_url: sourceApex?.icon_url ?? '',
+      required_points: Number(sourceApex?.required_points ?? 0),
+      description: sourceApex?.description ?? '',
+      is_revealed: Boolean(sourceApex?.is_revealed),
+      is_unlocked: Boolean(sourceApex?.is_unlocked),
+      is_hidden: sourceApex ? Boolean(sourceApex.is_hidden) : true,
+      is_manually_locked: sourceApex ? Boolean(sourceApex.is_manually_locked) : false,
     })
     setApexEditorOpen(true)
   }
@@ -723,7 +763,7 @@ export default function TalentTree({
       // e deve sempre carregar o nome original armazenado, nunca "???".
       supabase
         .from('talents')
-        .select('id, name, icon_url, description, is_hidden, supreme_unlocked')
+        .select('id, name, icon_url, description, is_hidden, supreme_unlocked, is_manually_locked')
         .eq('id', talent.id)
         .single(),
 
@@ -766,6 +806,7 @@ export default function TalentTree({
       is_hidden: Boolean(talentRecordResult.data.is_hidden),
       supreme_stars: talent.supreme_stars ?? 2,
       supreme_unlocked: Boolean(talentRecordResult.data.supreme_unlocked ?? talent.supreme_unlocked),
+      is_manually_locked: Boolean(talentRecordResult.data.is_manually_locked),
       analyses_required: talent.analyses_required ?? 0,
       analyses_completed: talent.analyses_completed ?? 0,
 
@@ -988,6 +1029,7 @@ export default function TalentTree({
       is_supreme: isSupreme,
       supreme_stars: isSupreme ? form.supreme_stars : 2,
       supreme_unlocked: isSupreme ? form.supreme_unlocked : false,
+      is_manually_locked: isSupreme ? form.is_manually_locked : false,
       analyses_required: form.is_hidden && form.tree_key !== 'supremo' ? analysesRequired : 0,
       analyses_completed: form.is_hidden && form.tree_key !== 'supremo' ? analysesCompleted : 0,
     }
@@ -1279,7 +1321,7 @@ export default function TalentTree({
   // Sincroniza o desbloqueio persistente do Ápice assim que a condição real for atingida.
   // O banco é a fonte de verdade; a chamada também corrige estados antigos já elegíveis.
   useEffect(() => {
-    if (!supabase || !apex || apex.is_unlocked || apexUnlockInFlight.current) return
+    if (!supabase || !apex || apex.is_unlocked || apex.is_manually_locked || apexUnlockInFlight.current) return
     const eligible = tree.id === 'supremo'
       ? supremeApexEligible
       : treeDistributed - apex.current_points >= apex.required_points
@@ -1439,7 +1481,7 @@ export default function TalentTree({
       </section>
 
       {apexUnlockNotice && apex && apex.is_unlocked && !apex.is_hidden && (
-        <div className={`talent-modal-backdrop${tree.id === 'supremo' ? ' tree-apex-supreme-backdrop' : ''}`} role="presentation">
+        <div className="talent-modal-backdrop" role="presentation">
           <section className={`talent-modal tree-apex-modal${tree.id === 'supremo' ? ' tree-apex-supreme-notice' : ''}`} role="dialog" aria-modal="true" aria-labelledby="apex-unlock-notice-title" style={{ textAlign: 'center' }}>
             <div className="tree-apex-modal-icon">{apex.icon_url ? <img src={apex.icon_url} alt="" /> : <Crown size={30} />}</div>
             {tree.id === 'supremo' ? (
@@ -1484,9 +1526,9 @@ export default function TalentTree({
             <label>URL da imagem<input value={apexForm.icon_url} onChange={(e) => setApexForm(v => ({...v, icon_url:e.target.value}))} placeholder="https://..."/></label>
             {tree.id !== 'supremo' && <label>Pontos necessários nesta árvore<input type="number" min={0} step={1} value={apexForm.required_points} onChange={(e) => setApexForm(v => ({...v, required_points:Math.max(0, Number(e.target.value) || 0)}))}/></label>}
             <label>Descrição / detalhes<textarea rows={5} value={apexForm.description} onChange={(e) => setApexForm(v => ({...v, description:e.target.value}))} placeholder="Descreva o efeito do Ápice..."/></label>
-            <label className="tree-apex-reveal-toggle"><input type="checkbox" checked={tree.id === 'supremo' ? supremeApexEligible : apexForm.is_unlocked} disabled={tree.id === 'supremo'} onChange={(e) => setApexForm(v => ({...v, is_unlocked:e.target.checked, is_revealed:e.target.checked}))}/> Desbloqueado</label>
+            <label className="tree-apex-reveal-toggle"><input type="checkbox" checked={apexForm.is_unlocked} onChange={(e) => setApexForm(v => ({...v, is_unlocked:e.target.checked, is_revealed:e.target.checked, is_hidden:!e.target.checked, is_manually_locked:!e.target.checked}))}/> Desbloqueado</label>
             <label className="tree-apex-reveal-toggle"><input type="checkbox" checked={apexForm.is_hidden} onChange={(e) => setApexForm(v => ({...v, is_hidden:e.target.checked}))}/> Oculto</label>
-            {tree.id === 'supremo' && <p className="apex-supreme-rule-note">O Ápice Supremo é desbloqueado automaticamente quando todas as Habilidades Supremas estiverem desbloqueadas e com os pré-requisitos alcançados.</p>}
+            {tree.id === 'supremo' && <p className="apex-supreme-rule-note">O Ápice Supremo é desbloqueado automaticamente quando todas as Habilidades Supremas estiverem desbloqueadas e com os pré-requisitos alcançados. O administrador também pode bloquear ou desbloquear manualmente; um bloqueio manual impede o desbloqueio automático até ser removido.</p>}
             <div className="talent-modal-actions"><button type="button" onClick={() => setApexEditorOpen(false)} disabled={apexSaving}>Cancelar</button><button type="button" onClick={() => void saveApex()} disabled={apexSaving}>{apexSaving ? 'Salvando...' : 'Salvar Ápice'}</button></div>
           </section>
         </div>
@@ -2220,7 +2262,7 @@ export default function TalentTree({
                       </select>
                     </label>
                     <label><span>Disponibilidade</span>
-                      <select value={form.supreme_unlocked ? 'unlocked' : 'locked'} onChange={(event) => { const unlocked = event.target.value === 'unlocked'; updateForm('supreme_unlocked', unlocked); updateForm('is_hidden', !unlocked) }}>
+                      <select value={form.supreme_unlocked ? 'unlocked' : 'locked'} onChange={(event) => { const unlocked = event.target.value === 'unlocked'; updateForm('supreme_unlocked', unlocked); updateForm('is_hidden', !unlocked); updateForm('is_manually_locked', !unlocked) }}>
                         <option value="locked">Bloqueada</option><option value="unlocked">Desbloqueada</option>
                       </select>
                     </label>

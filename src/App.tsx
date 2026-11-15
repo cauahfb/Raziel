@@ -49,6 +49,7 @@ function App() {
 
   const [activeTalentsByTree, setActiveTalentsByTree] = useState<Record<string, ActiveTalentSummary[]>>({})
   const [activeSupremeTalents, setActiveSupremeTalents] = useState<ActiveTalentSummary[]>([])
+  const [activeApexTreeKeys, setActiveApexTreeKeys] = useState<string[]>([])
   const [pendingTalentId, setPendingTalentId] = useState<string | null>(null)
   const [progressReady, setProgressReady] = useState(false)
   const [progressError, setProgressError] = useState<string | null>(null)
@@ -188,7 +189,7 @@ function App() {
           ),
         client.from('talents_safe').select('id, tree_key, name, is_supreme, is_hidden'),
         client.from('talent_progress_safe').select('talent_id, points'),
-        client.from('talent_tree_apices_safe').select('tree_key, current_points'),
+        client.from('talent_tree_apices_safe_v2').select('tree_key, current_points, is_unlocked'),
       ])
 
       if (cancelled) return
@@ -289,6 +290,9 @@ function App() {
         if (talent.is_supreme || talent.tree_key === 'supremo') activeSupremes.push(item)
         else (activeByTree[talent.tree_key] ??= []).push(item)
       }
+      const activeApexKeys = (apexProgressResult.data ?? [])
+        .filter((apex) => Boolean(apex.is_unlocked) && Number(apex.current_points) > 0)
+        .map((apex) => apex.tree_key)
       for (const apex of apexProgressResult.data ?? []) {
         const points = Number(apex.current_points) || 0
         distributed += points
@@ -298,6 +302,7 @@ function App() {
 
       setActiveTalentsByTree(activeByTree)
       setActiveSupremeTalents(activeSupremes)
+      setActiveApexTreeKeys(activeApexKeys)
 
       setCharacterLevel(loadedLevel)
       setTotalDistributed(distributed)
@@ -554,6 +559,7 @@ function App() {
           trees={treesWithProgress}
           activeTalentsByTree={activeTalentsByTree}
           activeSupremeTalents={activeSupremeTalents}
+          activeApexTreeKeys={activeApexTreeKeys}
           isAdmin={isAdmin && adminCheckReady}
           totalAvailable={totalAvailable}
           totalDistributed={totalDistributed}
@@ -605,6 +611,7 @@ function App() {
 
             setTotalDistributed((current) => current + difference)
             setSupremeRefresh((current) => current + 1)
+            setProgressRefresh((current) => current + 1)
 
             setTreeProgress((current) => {
               const currentTree = current[treeId] ?? {
@@ -666,6 +673,7 @@ function App() {
         trees={treesWithProgress}
         activeTalentsByTree={activeTalentsByTree}
         activeSupremeTalents={activeSupremeTalents}
+        activeApexTreeKeys={activeApexTreeKeys}
         isAdmin={isAdmin && adminCheckReady}
         totalAvailable={totalAvailable}
         totalDistributed={totalDistributed}

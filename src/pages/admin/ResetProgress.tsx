@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlertTriangle, RotateCcw, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, BellRing, RotateCcw, ShieldCheck } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 
 type Props = { onResetComplete: () => void }
@@ -9,6 +9,21 @@ export default function ResetProgress({ onResetComplete }: Props) {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  function resetApexAlerts() {
+    const resetApexNoticeStorage = (storage: Storage) => {
+      const keysToRemove: string[] = []
+      for (let index = 0; index < storage.length; index += 1) {
+        const key = storage.key(index)
+        if (key?.startsWith('raziel:seen-apex-unlock:')) keysToRemove.push(key)
+      }
+      keysToRemove.forEach((key) => storage.removeItem(key))
+    }
+    resetApexNoticeStorage(window.localStorage)
+    resetApexNoticeStorage(window.sessionStorage)
+    setMessage('Os alertas de todos os Ápices foram resetados neste navegador. Cada mensagem poderá aparecer novamente quando sua respectiva árvore for aberta.')
+    setError(null)
+  }
 
   async function resetAll() {
     if (!supabase || loading) return
@@ -21,7 +36,14 @@ export default function ResetProgress({ onResetComplete }: Props) {
       setLoading(false)
       return
     }
-    setMessage(`Progressão global resetada. ${Number(data) || 0} registros de progresso foram removidos.`)
+    const { error: apexResetError } = await supabase.from('talent_tree_apices').update({ current_points: 0 }).gt('current_points', 0)
+    if (apexResetError) {
+      setError(`Os talentos foram resetados, mas não foi possível zerar os pontos dos Ápices: ${apexResetError.message}. Execute novamente a ação após corrigir a permissão.`)
+      setLoading(false)
+      onResetComplete()
+      return
+    }
+    setMessage(`Progressão global resetada. ${Number(data) || 0} registros de progresso foram removidos, incluindo os pontos distribuídos nos Ápices.`)
     setConfirming(false)
     setLoading(false)
     onResetComplete()
@@ -48,10 +70,19 @@ export default function ResetProgress({ onResetComplete }: Props) {
               <div><button type="button" className="admin-reset-cancel" disabled={loading} onClick={() => setConfirming(false)}>Cancelar</button><button type="button" className="admin-reset-button" disabled={loading} onClick={() => void resetAll()}>{loading ? 'Resetando...' : 'Confirmar reset global'}</button></div>
             </div>
           )}
-          {message && <p className="admin-reset-success"><ShieldCheck size={15} /> {message}</p>}
-          {error && <p className="admin-reset-error"><AlertTriangle size={15} /> {error}</p>}
         </div>
       </article>
+      <article className="admin-reset-card">
+        <div className="admin-reset-icon"><BellRing size={23} /></div>
+        <div className="admin-reset-copy">
+          <span className="admin-reset-kicker">PREFERÊNCIAS DE NOTIFICAÇÃO</span>
+          <h2>Resetar alertas de todos os Ápices</h2>
+          <p>Limpa neste navegador o registro das mensagens de desbloqueio já apresentadas. Assim, cada alerta poderá aparecer novamente quando a árvore correspondente for aberta.</p>
+          <button type="button" className="admin-reset-button" onClick={resetApexAlerts}><BellRing size={15} /> Resetar alertas de todos os Ápices</button>
+        </div>
+      </article>
+      {message && <p className="admin-reset-success"><ShieldCheck size={15} /> {message}</p>}
+      {error && <p className="admin-reset-error"><AlertTriangle size={15} /> {error}</p>}
     </section>
   )
 }
