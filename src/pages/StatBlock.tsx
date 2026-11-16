@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { RefreshCw, Shield, Heart, Eye, Footprints, Wind, Waves, Mountain, MoveUpRight, Sparkles, Download, FileText } from 'lucide-react'
+import { RefreshCw, Shield, Heart, Eye, Footprints, Wind, Waves, Mountain, MoveUpRight, Sparkles, Download } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 type EffectRow = {
@@ -138,6 +138,7 @@ export default function StatBlock(){
     {error&&<p className="statblock-error" role="alert">{error}</p>}
     <article className="statblock-sheet">
       <div className="statblock-title"><Sparkles size={22}/><div><span>REGISTRO DE CAPACIDADES</span><h2>Estatísticas e características</h2></div></div>
+            <div className="statblock-meta"><span><small>NÍVEL GLOBAL</small><strong>{level??'—'}</strong></span><span><small>PONTOS INVESTIDOS</small><strong>{points}</strong></span><span><small>BENEFÍCIOS</small><strong>{effects.length}</strong></span></div>
       <div className="statblock-primary">
         <div><Shield/><span>CA</span><strong>{formatAmount(metrics.ac,'')}</strong></div>
         <div><Heart/><span>VIDA</span><strong>{formatAmount(metrics.hp,'PV')}</strong></div>
@@ -149,7 +150,6 @@ export default function StatBlock(){
           return <div className="statblock-movement-item" key={effect.id??index}><Icon size={18}/><span>{meta.label}</span><strong>{formatAmount(amountFor(effect),effect.parameters?.unit??'m')}</strong></div>
         })}</div>:<p className="statblock-empty">Nenhum deslocamento adicional registrado.</p>}
       </section>
-      <div className="statblock-meta"><span><small>NÍVEL GLOBAL</small><strong>{level??'—'}</strong></span><span><small>PONTOS INVESTIDOS</small><strong>{points}</strong></span><span><small>BENEFÍCIOS</small><strong>{effects.length}</strong></span></div>
       {grouped.length===0&&<p className="statblock-empty">Nenhum benefício estruturado foi adquirido ou está disponível para exibição.</p>}
       {grouped.map(section=><section className="statblock-section" key={section.key}><h3>{section.title}</h3>
         {section.rows.map((effect,index)=>{

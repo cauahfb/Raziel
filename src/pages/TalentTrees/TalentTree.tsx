@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import {
   AlertCircle,
   CheckCircle2,
+  CircleHelp,
   BookOpen,
   Eye,
   GripVertical,
@@ -221,7 +222,10 @@ function treeName(treeKey: string) {
 
   return trees.find((t) => t.id === treeKey)?.name ?? treeKey
 }
+
 const TALENTS_PER_PAGE = 10
+
+const treeLearningGuides: Record<string, { intro: string; focus: string; examples: string[]; note: string }> = {'vitalidade': {'intro': 'Bem-vindo à árvore de Vitalidade. Aqui, Raziel desenvolve o vigor do corpo, sua capacidade de sobreviver, recuperar-se e manter suas funções mesmo diante de condições extremas.', 'focus': 'Procure sinais de resistência biológica, recuperação acelerada, regeneração de tecidos, metabolismo incomum e adaptação a necessidades físicas.', 'examples': ['Trolls e outras criaturas capazes de regenerar ferimentos.', 'Hidras e monstros cuja anatomia demonstra recuperação ou recomposição extraordinária.', 'Criaturas adaptadas a sobreviver sem alimento, água ou repouso por períodos incomuns.', 'Itens mágicos que restauram vitalidade ou concedem regeneração, como um Anel de Regeneração.'], 'note': 'Atenção especial a criaturas que recuperam partes do corpo, resistem à exaustão física ou continuam funcionando após ferimentos severos.'}, 'resistencia': {'intro': 'Bem-vindo à árvore de Resistência. Esta árvore representa a capacidade de suportar agressões, danos e condições que seriam perigosas ou fatais para outros seres.', 'focus': 'Investigue defesas naturais ou sobrenaturais: carapaças, couraças, imunidades, resistência a elementos, venenos, doenças e ambientes extremos.', 'examples': ['Golems e construtos com corpos extremamente resistentes.', 'Dragões e elementais associados a tipos específicos de dano.', 'Criaturas venenosas ou imunes a doenças e condições debilitantes.', 'Itens mágicos defensivos, como anéis, mantos ou armaduras que concedem resistência a determinados danos.', 'Poções e artefatos que protegem contra fogo, frio, veneno ou outros perigos.'], 'note': 'Uma criatura não precisa ser resistente a tudo: uma defesa muito específica também pode revelar conhecimento relevante.'}, 'movimento': {'intro': 'Bem-vindo à árvore de Movimento. Aqui, Raziel busca compreender formas extraordinárias de locomoção e domínio do espaço.', 'focus': 'Observe criaturas que correm, saltam, escalam, nadam, escavam, planam, voam ou atravessam distâncias de maneiras sobrenaturais.', 'examples': ['Grifos, águias gigantes, alguns tipos de monges... e dragões, por suas capacidades de voo.', 'Aranhas gigantes e criaturas escaladoras, por sua mobilidade em superfícies verticais.', 'Ankhegs e outros seres escavadores.', 'Criaturas aquáticas, como tritões e elementais da água.', 'Aranhas planares ou seres capazes de teleporte e deslocamento dimensional.', 'Itens mágicos como Botas Élficas, Botas de Velocidade, Botas Aladas ou itens que concedam escalada e deslocamento especial.'], 'note': 'O modo de deslocamento importa: estudar um ser que voa pode oferecer pistas diferentes de estudar um que escava ou se teleporta.'}, 'ataque': {'intro': 'Bem-vindo à árvore de Ataque. Esta árvore reúne o conhecimento necessário para transformar o corpo e suas capacidades ofensivas em instrumentos de combate.', 'focus': 'Analise anatomias especializadas em atacar(melvis): garras, presas, chifres, caudas, ferrões, venenos, sopros e outras formas naturais ou mágicas de causar dano.', 'examples': ['Lobos, ursos e grandes felinos, por suas garras e mordidas.', 'Escorpiões gigantes e mantícoras, por ferrões e ataques à distância.', 'Dragões, por seus sopros e ataques elementais.', 'Criaturas com caudas, chifres, espinhos ou armas naturais incomuns.', 'Armas mágicas e artefatos que manifestem energia elemental ou ampliem ataques físicos.'], 'note': 'Dê preferência a observar como a criatura ataca, quais partes do corpo utiliza e se seus ataques carregam propriedades especiais.'}, 'mente': {'intro': 'Bem-vindo à árvore de Mente. Aqui, Raziel investiga capacidades intelectuais, memória, concentração, raciocínio e percepção estratégica.', 'focus': 'Busque seres com inteligência extraordinária, memória incomum, poderes psíquicos, disciplina mental ou capacidade de influenciar pensamentos.', 'examples': ['Devoradores de intelecto e devoradores de mentes, por suas capacidades psíquicas.', 'Esfinges, dragões antigos e outras criaturas de intelecto excepcional.', 'Aberrações com telepatia, memória ancestral ou domínio mental.', 'Itens mágicos que aprimoram a inteligência ou preservam conhecimentos, como uma Tiara do Intelecto ou tomos de conhecimento.'], 'note': 'Nem toda criatura inteligente possui uma propriedade mental extraordinária. Procure manifestações concretas de memória, raciocínio, concentração ou poder psíquico.'}, 'magia': {'intro': 'Bem-vindo à árvore de Magia. Esta árvore representa o estudo da Trama, das auras mágicas e das formas de manipular, ampliar ou compreender efeitos arcanos.', 'focus': 'Analise fontes de magia inata, conjuração, manipulação elemental, encantamentos, abjurações e fenômenos mágicos persistentes.', 'examples': ['Magos, feiticeiros, liches e outras criaturas conjuradoras.', 'Beholders e dragões, por suas manifestações mágicas naturais.', 'Elementais e seres cuja existência esteja ligada a forças mágicas ou elementais.', 'Varinhas, cajados, grimórios, focos arcanos e outros itens que armazenem ou canalizem magia.', 'Locais de poder, fontes mágicas, portais e fenômenos ligados à Trama.'], 'note': 'A magia pode estar em uma criatura, em um objeto ou no próprio ambiente. Observe a origem e a natureza dos efeitos manifestados.'}, 'sentido': {'intro': 'Bem-vindo à árvore de Sentido. Aqui, Raziel estuda formas de percepção que ultrapassam os limites dos sentidos comuns.', 'focus': 'Investigue visão no escuro, audição e olfato aguçados, percepção de vibrações, detecção de magia, invisibilidade, ilusões e presença espiritual ou dimensional.', 'examples': ['Morcegos e criaturas que percebem o ambiente por ecos ou vibrações.', 'Lobos e outros predadores com olfato e audição extraordinários.', 'Morcegos, aranhas e monstros com percepção por vibração ou sentidos especiais.', 'Fantasmas e seres etéreos que percebem planos ou presenças invisíveis.', 'Itens mágicos como Olhos de Águia, Olhos de Visão Verdadeira ou objetos que detectem magia e invisibilidade.'], 'note': 'Considere não apenas os sentidos físicos, mas também percepções mágicas, espirituais e planares.'}, 'alma': {'intro': 'Bem-vindo à árvore de Alma. Esta árvore investiga a essência espiritual, os vínculos entre corpo e alma e as forças que ultrapassam a existência física.', 'focus': 'Procure seres ligados aos mortos, espíritos, planos além do mundo material, possessão, drenagem de energia vital e projeção espiritual.', 'examples': ['Fantasmas, espectros, aparições e wraiths, por sua natureza incorpórea e espiritual.', 'Revenants e outras criaturas cuja existência esteja ligada à persistência da alma.', 'Liches e outros seres que prendem ou preservam a própria essência.', 'Criaturas capazes de possuir corpos, drenar energia vital ou atravessar o Plano Etéreo.', 'Itens e relíquias associados a almas, espíritos, possessão ou passagem entre planos.'], 'note': 'Nem todo morto-vivo manifesta uma conexão espiritual relevante. Busque evidências de vínculo com almas, consciência após a morte ou interação com outros planos.'}}
 
 export default function TalentTree({
   tree,
@@ -249,6 +253,7 @@ export default function TalentTree({
   const [updatingTalentId, setUpdatingTalentId] = useState<string | null>(null)
   const [progressMessage, setProgressMessage] = useState<string | null>(null)
   const [apex, setApex] = useState<TreeApex | null>(null)
+  const [treeHelpOpen, setTreeHelpOpen] = useState(false)
   const [apexEditorOpen, setApexEditorOpen] = useState(false)
   const [apexDetailsOpen, setApexDetailsOpen] = useState(false)
   const [apexUnlockNotice, setApexUnlockNotice] = useState(false)
@@ -537,20 +542,21 @@ export default function TalentTree({
   }, [tree.id, reloadKey, refreshKey, isAdmin])
 
   useEffect(() => {
-    if (!selectedTalent && !modalOpen && !deletingTalent) return
+    if (!selectedTalent && !modalOpen && !deletingTalent && !treeHelpOpen) return
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape' && !saving && !deleteLoading) {
         setSelectedTalent(null)
         setModalOpen(false)
         setDeletingTalent(null)
+        setTreeHelpOpen(false)
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
 
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [selectedTalent, modalOpen, deletingTalent, saving, deleteLoading])
+  }, [selectedTalent, modalOpen, deletingTalent, treeHelpOpen, saving, deleteLoading])
 
   function openTalent(talent: TalentWithPrerequisites) {
     if (talent.is_hidden) return
@@ -1446,9 +1452,126 @@ export default function TalentTree({
               <ArrowUpDown size={14} />{sortingMode ? 'SAIR DA ORDENAÇÃO' : 'ORDENAÇÃO'}
             </button>
           )}
-          <div className="tree-page-icon"><Icon size={27} /></div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {tree.id !== 'supremo' && treeLearningGuides[tree.id] && (
+              <button
+                type="button"
+                onClick={() => setTreeHelpOpen(true)}
+                aria-label={`Ajuda sobre a árvore ${tree.name}`}
+                title={`Sobre a árvore ${tree.name}`}
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  display: 'grid',
+                  placeItems: 'center',
+                  border: '1px solid #dfd5c2',
+                  borderRadius: '50%',
+                  background: '#fbf8f1',
+                  color: '#927a54',
+                  cursor: 'pointer',
+                  transition: 'background .18s ease, border-color .18s ease, transform .18s ease',
+                }}
+                onMouseEnter={(event) => { event.currentTarget.style.background = '#f1eadc'; event.currentTarget.style.borderColor = '#bda77f' }}
+                onMouseLeave={(event) => { event.currentTarget.style.background = '#fbf8f1'; event.currentTarget.style.borderColor = '#dfd5c2' }}
+              >
+                <CircleHelp size={17} strokeWidth={1.8} />
+              </button>
+            )}
+            <div className="tree-page-icon"><Icon size={27} /></div>
+          </div>
         </div>
       </section>
+
+      {treeHelpOpen && treeLearningGuides[tree.id] && (
+        <div
+          role="presentation"
+          onMouseDown={(event) => { if (event.target === event.currentTarget) setTreeHelpOpen(false) }}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1200, display: 'flex',
+            alignItems: 'center', justifyContent: 'center', padding: '20px',
+            background: 'rgba(25, 29, 34, .58)', backdropFilter: 'blur(4px)',
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="tree-guide-title"
+            style={{
+              position: 'relative', width: 'min(100%, 590px)', maxHeight: 'min(86vh, 760px)',
+              overflowY: 'auto', border: '1px solid #d9c9a9', borderRadius: '16px',
+              background: 'linear-gradient(155deg, #fffdf8 0%, #f7f2e8 100%)',
+              boxShadow: '0 24px 80px rgba(0,0,0,.28)', color: '#39434a',
+              padding: 'clamp(22px, 4vw, 34px)',
+            }}
+          >
+            <div aria-hidden="true" style={{ position: 'absolute', top: '12px', left: '14px', color: '#b99d6e', fontSize: '19px', opacity: .8 }}>✧</div>
+            <div aria-hidden="true" style={{ position: 'absolute', top: '12px', right: '14px', color: '#b99d6e', fontSize: '19px', opacity: .8 }}>✧</div>
+            <button
+              type="button"
+              onClick={() => setTreeHelpOpen(false)}
+              aria-label="Fechar ajuda"
+              style={{
+                position: 'absolute', top: '16px', right: '18px', width: '32px', height: '32px',
+                display: 'grid', placeItems: 'center', border: '1px solid #e5dccb',
+                borderRadius: '50%', background: 'rgba(255,255,255,.72)', color: '#7b817f',
+                cursor: 'pointer',
+              }}
+            >
+              <X size={16} />
+            </button>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '9px', padding: '3px 22px 20px' }}>
+              <div style={{ width: '54px', height: '54px', display: 'grid', placeItems: 'center', border: '1px solid #d8c6a2', borderRadius: '50%', background: '#f2eadb', color: '#987b4e' }}>
+                <Icon size={25} strokeWidth={1.6} />
+              </div>
+              <div style={{ color: '#a58a5e', fontSize: '9px', fontWeight: 800, letterSpacing: '2px' }}>GUIA DE DESCOBERTA · RAZIEL</div>
+              <h2 id="tree-guide-title" style={{ margin: 0, color: '#35434a', fontFamily: 'Georgia, serif', fontSize: 'clamp(23px, 4vw, 29px)', fontWeight: 600 }}>
+                Árvore de {tree.name}
+              </h2>
+              <div aria-hidden="true" style={{ width: '90px', height: '1px', background: 'linear-gradient(90deg, transparent, #b99d6e, transparent)' }} />
+              <p style={{ margin: 0, maxWidth: '470px', color: '#59656a', fontSize: '13px', lineHeight: 1.75 }}>
+                {treeLearningGuides[tree.id].intro}
+              </p>
+            </div>
+
+            <div style={{ display: 'grid', gap: '15px' }}>
+              <div style={{ padding: '15px 17px', border: '1px solid #e7dece', borderRadius: '10px', background: 'rgba(255,255,255,.58)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '7px', color: '#8c744f', fontSize: '10px', fontWeight: 800, letterSpacing: '1.1px' }}>
+                  <Sparkles size={14} /> O QUE PROCURAR
+                </div>
+                <p style={{ margin: 0, color: '#536168', fontSize: '12px', lineHeight: 1.7 }}>{treeLearningGuides[tree.id].focus}</p>
+              </div>
+
+              <div style={{ padding: '15px 17px', border: '1px solid #e7dece', borderRadius: '10px', background: 'rgba(255,255,255,.58)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '9px', color: '#8c744f', fontSize: '10px', fontWeight: 800, letterSpacing: '1.1px' }}>
+                  <BookOpen size={14} /> EXEMPLOS DE DESCOBERTA
+                </div>
+                <ul style={{ margin: 0, paddingLeft: '18px', display: 'grid', gap: '7px', color: '#536168', fontSize: '12px', lineHeight: 1.65 }}>
+                  {treeLearningGuides[tree.id].examples.map((example, index) => (
+                    <li key={`${tree.id}-example-${index}`}>{example}</li>
+                  ))}
+                </ul>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '9px', padding: '12px 14px', borderLeft: '3px solid #b99d6e', borderRadius: '4px 8px 8px 4px', background: '#f0e9dc' }}>
+                <CircleHelp size={15} style={{ flex: '0 0 auto', marginTop: '2px', color: '#987b4e' }} />
+                <p style={{ margin: 0, color: '#6a655b', fontSize: '11px', lineHeight: 1.65 }}>{treeLearningGuides[tree.id].note}</p>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'center', paddingTop: '20px' }}>
+              <button
+                type="button"
+                onClick={() => setTreeHelpOpen(false)}
+                style={{ minHeight: '38px', padding: '0 24px', border: '1px solid #a88d60', borderRadius: '20px', background: '#8e7958', color: '#fffdf8', font: 'inherit', fontSize: '11px', fontWeight: 700, letterSpacing: '.4px', cursor: 'pointer' }}
+              >
+                ENTENDI
+              </button>
+            </div>
+            <div aria-hidden="true" style={{ position: 'absolute', bottom: '10px', left: '14px', color: '#b99d6e', fontSize: '15px', opacity: .65 }}>❧</div>
+            <div aria-hidden="true" style={{ position: 'absolute', bottom: '10px', right: '14px', color: '#b99d6e', fontSize: '15px', opacity: .65 }}>❧</div>
+          </section>
+        </div>
+      )}
 
       <section className={`tree-summary${tree.id === 'supremo' ? ' supreme-tree-apex' : ''}`}>
         {tree.id === 'supremo' ? (
