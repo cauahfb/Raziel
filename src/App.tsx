@@ -421,10 +421,10 @@ function App() {
     [treeProgress],
   )
 
-  // 3 pontos por nível do 1 ao 20; 5 pontos por nível a partir do 21.
+  // 4 pontos por nível do 1 ao 20; 13 pontos por nível a partir do 21.
   const totalPoints =
-    Math.min(characterLevel, 20) * 3 +
-    Math.max(characterLevel - 20, 0) * 5
+    Math.min(characterLevel, 20) * 4 +
+    Math.max(characterLevel - 20, 0) * 13
 
   const totalAvailable = Math.max(
     totalPoints - totalDistributed,

@@ -130,8 +130,8 @@ export default function Dashboard({
 
   // Mantém o total exibido no Dashboard igual ao cálculo central do App.
   const totalPoints =
-    Math.min(characterLevel, 20) * 3 +
-    Math.max(characterLevel - 20, 0) * 5
+    Math.min(characterLevel, 20) * 4 +
+    Math.max(characterLevel - 20, 0) * 13
 
   const progress =
     totalPoints > 0

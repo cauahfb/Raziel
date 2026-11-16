@@ -182,7 +182,7 @@ export default function AppLayout({ activePage, trees, isAdmin, supremeAvailable
                     <table className="help-table">
                       <thead><tr><th>Nível do Personagem</th><th>Total de Pontos de Talento</th></tr></thead>
                       <tbody>
-                        {[[10,30],[15,45],[20,60],[21,65],[25,85],[30,110],[40,160],[50,210]].map(([level, points]) => (
+                        {[[10,40],[15,60],[20,80],[21,93],[25,145],[30,210],[40,340],[50,470]].map(([level, points]) => (
                           <tr key={level}><td>{level}</td><td>{points}</td></tr>
                         ))}
                       </tbody>

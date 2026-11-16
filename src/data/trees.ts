@@ -87,4 +87,4 @@ export const trees: Tree[] = [
   },
 ]
 
-export const POINTS_PER_LEVEL = 3
+export const POINTS_PER_LEVEL = 4
