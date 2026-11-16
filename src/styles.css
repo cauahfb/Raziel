@@ -4711,3 +4711,30 @@ section.tree-summary.supreme-tree-apex > div.tree-apex-summary {
 @media(max-width:640px) {
   .talent-modal .raziel-effects-heading { align-items:stretch; }
 }
+
+
+
+/* Exportação PDF do Resumo da Ficha */
+.statblock-header-actions { display:flex; align-items:center; gap:9px; }
+.statblock-save-button { display:inline-flex; align-items:center; justify-content:center; gap:7px; }
+@media(max-width:640px) {
+  .statblock-header-actions { align-items:stretch; flex-direction:column; }
+  .statblock-header-actions > button { width:100%; }
+}
+@page { size:auto; margin:14mm; }
+@media print {
+  html,body { background:#fff !important; }
+  body * { visibility:hidden !important; }
+  .statblock-sheet,.statblock-sheet * { visibility:visible !important; }
+  .statblock-sheet {
+    position:absolute !important; left:0 !important; top:0 !important;
+    width:100% !important; max-width:none !important; margin:0 !important;
+    padding:0 !important; border:0 !important; border-radius:0 !important;
+    box-shadow:none !important; background:#fffefa !important;
+    -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important;
+  }
+  .statblock-page { margin:0 !important; padding:0 !important; background:#fff !important; }
+  .statblock-header,.statblock-error { display:none !important; }
+  .statblock-sheet details { display:block !important; }
+  .statblock-sheet details > * { display:block !important; }
+}

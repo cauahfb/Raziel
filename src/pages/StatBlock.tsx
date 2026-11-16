@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { RefreshCw, Shield, Heart, Eye, Footprints, Wind, Waves, Mountain, MoveUpRight, Sparkles } from 'lucide-react'
+import { RefreshCw, Shield, Heart, Eye, Footprints, Wind, Waves, Mountain, MoveUpRight, Sparkles, Download, FileText } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 type EffectRow = {
@@ -122,9 +122,19 @@ export default function StatBlock(){
     return sections.map(section=>({...section,rows:map.get(section.key)??[]})).filter(section=>section.rows.length)
   },[effects])
 
+  function saveAsPdf(){
+    // A impressão do navegador permite salvar em PDF sem adicionar bibliotecas ao projeto.
+    window.setTimeout(()=>window.print(),100)
+  }
+
+
+
   if(loading)return <main className="statblock-page"><p className="statblock-feedback">Consultando os registros de Raziel…</p></main>
   return <main className="statblock-page">
-    <header className="statblock-header"><div><span className="eyebrow"><span className="eyebrow-line"/>COMPÊNDIO DE RAZIEL</span><h1>Resumo da Ficha</h1><p>Suas capacidades adquiridas, organizadas em formato de ficha.</p></div><button type="button" onClick={()=>void load()} aria-label="Atualizar resumo"><RefreshCw size={16}/> Atualizar</button></header>
+    <header className="statblock-header"><div><span className="eyebrow"><span className="eyebrow-line"/>COMPÊNDIO DE RAZIEL</span><h1>Resumo da Ficha</h1><p>Suas capacidades adquiridas, organizadas em formato de ficha.</p></div><div className="statblock-header-actions">
+      <button type="button" onClick={()=>void load()} aria-label="Atualizar resumo"><RefreshCw size={16}/> Atualizar</button>
+      <button type="button" className="statblock-save-button" onClick={saveAsPdf}><Download size={16}/> Salvar PDF</button>
+    </div></header>
     {error&&<p className="statblock-error" role="alert">{error}</p>}
     <article className="statblock-sheet">
       <div className="statblock-title"><Sparkles size={22}/><div><span>REGISTRO DE CAPACIDADES</span><h2>Estatísticas e características</h2></div></div>
