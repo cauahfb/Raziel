@@ -106,6 +106,11 @@ function activityDetails(activity:ActivityRow):string[] {
   if(d.attack?.type)rows.push(`Ataque: ${attackTypeLabel[String(d.attack.type)]??String(d.attack.type)}`)
   if(d.damage?.formula)rows.push(`Dano: ${d.damage.formula}${d.damage.type?` ${damageLabel[d.damage.type]??d.damage.type}`:''}${d.damage.halfOnSuccess?' · metade em caso de sucesso':''}`)
   if(d.healing?.formula)rows.push(`Cura: ${d.healing.formula}`)
+  if(d.uses?.limited && Number(d.uses.max)>0){
+    const rechargeLabel:Record<string,string>={shortRest:'descanso curto',longRest:'descanso longo',turnStart:'início do seu turno',special:'condição especial'}
+    const recharge=rechargeLabel[String(d.uses.recharge)]??'sem recarga definida'
+    rows.push(`Usos: ${d.uses.max} · Recupera: ${recharge}${d.uses.recharge==='special'&&d.uses.special?` (${d.uses.special})`:''}`)
+  }
   return rows
 }
 function ActivityIcon({type}:{type:string}){

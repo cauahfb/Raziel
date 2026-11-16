@@ -101,6 +101,10 @@ type ActivityDraft = {
   damageType: string
   halfOnSuccess: boolean
   description: string
+  usesLimited: boolean
+  usesMax: string
+  recharge: 'shortRest' | 'longRest' | 'turnStart' | 'special'
+  rechargeSpecial: string
   expanded: boolean
 }
 const activityTypes: {value:ActivityType;label:string}[] = [
@@ -120,7 +124,8 @@ const makeActivity = (): ActivityDraft => ({
   id:crypto.randomUUID(), name:'', type:'save', activationType:'action', activationCost:'1',
   rangeValue:'', rangeUnit:'m', targetType:'sphere', targetValue:'', targetUnits:'m',
   saveAbility:'dex', saveDcType:'ability', saveDcValue:'', attackType:'spell', attackAbility:'spellcasting',
-  damageFormula:'', damageType:'fire', halfOnSuccess:true, description:'', expanded:true
+  damageFormula:'', damageType:'fire', halfOnSuccess:true, description:'',
+  usesLimited:false, usesMax:'1', recharge:'longRest', rechargeSpecial:'', expanded:true
 })
 function parseActivity(row:any): ActivityDraft {
   const d=row.activity_data??{}
@@ -134,7 +139,9 @@ function parseActivity(row:any): ActivityDraft {
     attackType:d.attack?.type??'spell', attackAbility:d.attack?.ability??'spellcasting',
     damageFormula:d.damage?.formula??d.healing?.formula??'',
     damageType:d.damage?.type??'fire', halfOnSuccess:Boolean(d.damage?.halfOnSuccess),
-    description:d.description??'', expanded:false
+    description:d.description??'', usesLimited:Boolean(d.uses?.limited ?? (d.uses?.max != null)),
+    usesMax:String(d.uses?.max ?? '1'), recharge:d.uses?.recharge??'longRest',
+    rechargeSpecial:d.uses?.special??'', expanded:false
   }
 }
 
@@ -213,6 +220,11 @@ const TalentEffectsEditor=forwardRef<TalentEffectsEditorHandle,{talentId?:string
     }
 
     const activityPayload=activities.filter(x=>x.name.trim()).map((a,index)=>{
+      if(a.usesLimited){
+        const max=Number(a.usesMax)
+        if(!Number.isInteger(max)||max<1)throw new Error(`A quantidade máxima de usos de "${a.name}" deve ser um inteiro maior que zero.`)
+        if(a.recharge==='special'&&!a.rechargeSpecial.trim())throw new Error(`Descreva a condição de recarga especial de "${a.name}".`)
+      }
       const numeric=(value:string,label:string)=>{if(!value.trim())return null;const n=parseLocalizedNumber(value);if(!Number.isFinite(n)||n<0)throw new Error(`${label} deve ser um número válido.`);return n}
       const data:any={type:a.type,description:a.description.trim()||null,activation:{type:a.activationType,cost:numeric(a.activationCost,'Custo de ativação')??1}}
       const range=numeric(a.rangeValue,'Alcance');if(range!==null)data.range={value:range,unit:a.rangeUnit}
@@ -223,14 +235,16 @@ const TalentEffectsEditor=forwardRef<TalentEffectsEditorHandle,{talentId?:string
         if(a.damageFormula.trim())data.damage={formula:a.damageFormula.trim(),type:a.damageType,halfOnSuccess:a.type==='save'&&a.halfOnSuccess}
       }
       if(a.type==='heal'&&a.damageFormula.trim())data.healing={formula:a.damageFormula.trim()}
+      if(a.usesLimited)data.uses={limited:true,max:Number(a.usesMax),recharge:a.recharge,...(a.recharge==='special'?{special:a.rechargeSpecial.trim()}: {})}
       return {id:a.id??crypto.randomUUID(),talent_id:id,name:a.name.trim(),activity_data:data,sort_order:index,is_enabled:true}
     })
+    // Upsert first: if persistence fails, do not delete the previously saved activities.
+    if(activityPayload.length){const {error}=await supabase.from('compendium_talent_activities').upsert(activityPayload,{onConflict:'id'});if(error)throw error}
     const retainedIds=activityPayload.map(x=>x.id)
     let deleteQuery=supabase.from('compendium_talent_activities').delete().eq('talent_id',id)
     if(retainedIds.length)deleteQuery=deleteQuery.not('id','in',`(${retainedIds.join(',')})`)
     const {error:deleteActivitiesError}=await deleteQuery
     if(deleteActivitiesError)throw deleteActivitiesError
-    if(activityPayload.length){const {error}=await supabase.from('compendium_talent_activities').upsert(activityPayload,{onConflict:'id'});if(error)throw error}
   }}),[items,activities,loading])
 
   function patch(i:number,change:Partial<Draft>){setItems(current=>current.map((x,index)=>index===i?{...x,...change}:x))}
@@ -294,6 +308,15 @@ const TalentEffectsEditor=forwardRef<TalentEffectsEditorHandle,{talentId?:string
           </fieldset>}
           {a.type==='attack'&&<fieldset className="raziel-activity-fieldset"><legend>Configuração do ataque</legend><div className="raziel-effect-two-col"><label>Categoria<select value={a.attackType} onChange={e=>setActivities(c=>c.map((x,n)=>n===i?{...x,attackType:e.target.value}:x))}><option value="spell">Ataque mágico</option><option value="weapon">Ataque com arma</option><option value="unarmed">Ataque desarmado</option></select></label><label>Atributo<select value={a.attackAbility} onChange={e=>setActivities(c=>c.map((x,n)=>n===i?{...x,attackAbility:e.target.value}:x))}><option value="spellcasting">Conjuração</option><option value="str">Força</option><option value="dex">Destreza</option><option value="none">Sem atributo</option></select></label></div></fieldset>}
           {['attack','save','damage','heal'].includes(a.type)&&<fieldset className="raziel-activity-fieldset"><legend>{a.type==='heal'?'Cura':'Dano'}</legend><label>Fórmula<input value={a.damageFormula} onChange={e=>setActivities(c=>c.map((x,n)=>n===i?{...x,damageFormula:e.target.value}:x))} placeholder="Ex.: 8d6 + modificador"/></label>{a.type!=='heal'&&<label>Tipo de dano<select value={a.damageType} onChange={e=>setActivities(c=>c.map((x,n)=>n===i?{...x,damageType:e.target.value}:x))}>{damageTypes.map(([v,l])=><option value={v} key={v}>{l}</option>)}</select></label>}</fieldset>}
+          <fieldset className="raziel-activity-fieldset"><legend>Usos e recarga</legend>
+            <label className="raziel-effect-check"><input type="checkbox" checked={a.usesLimited} onChange={e=>setActivities(c=>c.map((x,n)=>n===i?{...x,usesLimited:e.target.checked}:x))}/> Esta atividade possui limite de usos</label>
+            {a.usesLimited&&<>
+              <label>Quantidade máxima de usos<input type="number" min="1" step="1" inputMode="numeric" value={a.usesMax} onChange={e=>setActivities(c=>c.map((x,n)=>n===i?{...x,usesMax:e.target.value}:x))} placeholder="Ex.: 2"/></label>
+              <label>Recuperação dos usos<select value={a.recharge} onChange={e=>setActivities(c=>c.map((x,n)=>n===i?{...x,recharge:e.target.value as ActivityDraft['recharge']}:x))}><option value="shortRest">Descanso curto</option><option value="longRest">Descanso longo</option><option value="turnStart">Início do seu turno</option><option value="special">Condição especial</option></select></label>
+              {a.recharge==='special'&&<label>Condição de recarga<textarea rows={2} value={a.rechargeSpecial} onChange={e=>setActivities(c=>c.map((x,n)=>n===i?{...x,rechargeSpecial:e.target.value}:x))} placeholder="Ex.: Ao amanhecer, após completar um ritual…"/></label>}
+            </>}
+            <small className="raziel-field-help">Sem limite de usos: a atividade permanece ilimitada. A recarga especial será registrada como regra descritiva; não será automatizada pelo Foundry.</small>
+          </fieldset>
           <label>Descrição / instruções<textarea rows={2} value={a.description} onChange={e=>setActivities(c=>c.map((x,n)=>n===i?{...x,description:e.target.value}:x))} placeholder="Regras adicionais, limitações ou observações…"/></label>
         </div>}
       </article>)}
