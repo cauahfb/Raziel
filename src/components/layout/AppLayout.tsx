@@ -172,8 +172,8 @@ export default function AppLayout({ activePage, trees, isAdmin, supremeAvailable
                     <table className="help-table">
                       <thead><tr><th>Progressão</th><th>Pontos Recebidos por Nível</th></tr></thead>
                       <tbody>
-                        <tr><td>Níveis 1 a 20</td><td>3 pontos</td></tr>
-                        <tr><td>Níveis 21 em diante</td><td>5 pontos</td></tr>
+                        <tr><td>Níveis 1 a 20</td><td>4 pontos</td></tr>
+                        <tr><td>Níveis 21 em diante</td><td>13 pontos</td></tr>
                       </tbody>
                     </table>
                   </div>
