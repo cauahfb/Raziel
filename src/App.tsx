@@ -600,7 +600,7 @@ function App() {
       return renderAdminPage(page)
     }
 
-    if (page === 'summary') return <StatBlock />
+    if (page === 'summary') return <StatBlock isAdmin={isAdmin && adminCheckReady} />
 
     if (page === 'dashboard') {
       return (

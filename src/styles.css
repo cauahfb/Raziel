@@ -4738,3 +4738,82 @@ section.tree-summary.supreme-tree-apex > div.tree-apex-summary {
   .statblock-sheet details { display:block !important; }
   .statblock-sheet details > * { display:block !important; }
 }
+
+
+/* Editor de atividades executáveis exportadas como Activities do D&D 5e */
+.raziel-activities-editor { margin-top:22px; padding-top:18px; border-top:1px solid #554665; }
+.raziel-activities-editor .raziel-effects-heading h3 { color:#e6d0f1; }
+.raziel-activity-fieldset { display:grid; gap:10px; margin:2px 0; padding:12px; border:1px solid #59496a; border-radius:8px; }
+.raziel-activity-fieldset legend { padding:0 6px; color:#cba7df; font-size:11px; font-weight:700; }
+.raziel-activity-fieldset label { display:grid; gap:5px; color:#d6c9de; font-size:11px; font-weight:600; }
+.raziel-activity-fieldset input:not([type=checkbox]),.raziel-activity-fieldset select { box-sizing:border-box; width:100%; min-width:0; padding:9px 10px; border:1px solid #51465b; border-radius:6px; color:#f0eaf4; background:#191521; font:inherit; font-size:12px; }
+.raziel-activity-fieldset .raziel-effect-check { display:flex; align-items:center; gap:8px; font-weight:500; }
+.talent-modal .raziel-activities-editor { border-top-color:#e7e4dc; }
+.talent-modal .raziel-activities-editor .raziel-effects-heading h3 { color:#35495b; }
+.talent-modal .raziel-activities-editor .raziel-effects-heading p { color:#87919a; }
+.talent-modal .raziel-activity-fieldset { border-color:#e2dfd8; }
+.talent-modal .raziel-activity-fieldset legend { color:#697c89; }
+.talent-modal .raziel-activity-fieldset label { color:#52616d; }
+.talent-modal .raziel-activity-fieldset input:not([type=checkbox]),.talent-modal .raziel-activity-fieldset select { border-color:#d8dce0; color:#35495b; background:#fff; }
+@media(max-width:640px) { .raziel-activity-fieldset .raziel-effect-two-col { grid-template-columns:1fr; } }
+
+
+/* Campos numéricos decimais: entrada localizada com vírgula ou ponto. */
+.raziel-effect-form input[inputmode="decimal"] { font-variant-numeric: tabular-nums; }
+
+/* Atividades no Resumo: bloco editorial integrado ao stat block. */
+.statblock-meta { grid-template-columns:repeat(4,minmax(0,1fr)); }
+.statblock-activities { padding:20px 0 2px; }
+.statblock-activities-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; padding-bottom:9px; border-bottom:1px solid #e6e0d2; }
+.statblock-activities-heading h3 { display:flex; align-items:center; gap:8px; margin:0; color:#344e62; font:500 16px Georgia,serif; letter-spacing:.4px; text-transform:uppercase; }
+.statblock-activities-heading h3 svg { color:#9b8350; }
+.statblock-activities-heading > span { color:#9b8350; font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
+.statblock-activity { display:grid; grid-template-columns:38px minmax(0,1fr); gap:12px; padding:15px 0; border-bottom:1px solid rgba(230,224,210,.8); }
+.statblock-activity:last-of-type { border-bottom:0; }
+.statblock-activity-icon { display:grid; place-items:center; width:36px; height:36px; border:1px solid #e4dcc8; border-radius:8px; color:#9b8350; background:#f7f4eb; }
+.statblock-activity-content { min-width:0; }
+.statblock-activity-title { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:6px; }
+.statblock-activity-title strong { color:#26394b; font:600 15px Georgia,serif; }
+.statblock-activity-title span { padding:3px 7px; border:1px solid #e5dfd1; border-radius:4px; color:#927846; font-size:9px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; }
+.statblock-activity-content ul { display:flex; flex-wrap:wrap; gap:5px 16px; margin:0 0 7px; padding:0; list-style:none; }
+.statblock-activity-content li { color:#637482; font-size:11px; line-height:1.55; }
+.statblock-activity-content li:not(:last-child)::after { content:""; }
+.statblock-activity-content p { margin:6px 0; color:#536574; font-size:12px; line-height:1.65; white-space:pre-line; }
+.statblock-activity-content small { color:#9b8d78; font-size:10px; }
+@media(max-width:640px) {
+  .statblock-meta { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .statblock-activity { grid-template-columns:30px minmax(0,1fr); gap:9px; }
+  .statblock-activity-icon { width:30px; height:30px; }
+  .statblock-activity-content ul { display:grid; gap:3px; }
+}
+@media print {
+  .statblock-activities { break-inside:avoid; }
+  .statblock-activity { break-inside:avoid; }
+}
+
+
+/* Integração remota Raziel / Foundry */
+.foundry-sync-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 18px;
+  padding: 11px 14px;
+  border: 1px solid rgba(150, 160, 155, .25);
+  border-radius: 8px;
+  color: var(--text-secondary, #64706c);
+  font-size: .82rem;
+}
+.foundry-sync-status.success { border-color: rgba(83, 153, 119, .38); }
+.foundry-sync-status.error { border-color: rgba(180, 83, 83, .42); }
+.foundry-sync-indicator { display: inline-flex; align-items: center; }
+.foundry-pairing-code {
+  margin-left: auto;
+  padding: 5px 10px;
+  border-radius: 6px;
+  background: rgba(178, 145, 83, .12);
+  color: var(--text-primary, #283b38);
+  font-size: 1rem;
+  letter-spacing: .08em;
+}
