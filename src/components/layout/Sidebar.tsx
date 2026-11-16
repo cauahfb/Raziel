@@ -8,6 +8,7 @@ import {
   Database,
   History,
   LayoutDashboard,
+  ScrollText,
   LockKeyhole,
   RotateCcw,
   Shield,
@@ -59,19 +60,27 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* Visão geral */}
+      {/* Visão geral e resumo da ficha */}
       <div className="nav-label">COMPENDIUM</div>
 
       <button
         type="button"
-        className={`nav-item ${
-          activePage === 'dashboard' ? 'active' : ''
-        }`}
+        className={`nav-item ${activePage === 'dashboard' ? 'active' : ''}`}
         onClick={() => navigate('dashboard')}
         aria-current={activePage === 'dashboard' ? 'page' : undefined}
       >
         <LayoutDashboard size={17} />
         <span>Visão geral</span>
+      </button>
+
+      <button
+        type="button"
+        className={`nav-item ${activePage === 'summary' ? 'active' : ''}`}
+        onClick={() => navigate('summary')}
+        aria-current={activePage === 'summary' ? 'page' : undefined}
+      >
+        <ScrollText size={17} />
+        <span>Resumo da Ficha</span>
       </button>
 
       {/* Árvores de talentos */}

@@ -21,6 +21,7 @@ import {
 import type { Tree } from '../../types/tree'
 import { supabase } from '../../lib/supabase'
 import { trees } from '../../data/trees'
+import TalentEffectsEditor, { type TalentEffectsEditorHandle } from '../../components/TalentEffectsEditor'
 
 type Talent = {
   id: string
@@ -256,6 +257,7 @@ export default function TalentTree({
   const [apexForm, setApexForm] = useState({ name: '', icon_url: '', required_points: 0, description: '', is_revealed: false, is_unlocked: false, is_hidden: true, is_manually_locked: false })
 
   const [modalOpen, setModalOpen] = useState(false)
+  const effectsEditorRef = useRef<TalentEffectsEditorHandle>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<TalentForm>(emptyForm)
   const [prerequisiteSearch, setPrerequisiteSearch] = useState('')
@@ -1084,6 +1086,15 @@ export default function TalentTree({
     }
 
     const talentId = result.data.id
+
+    try {
+      await effectsEditorRef.current?.save(talentId)
+    } catch (effectError) {
+      setError(`O talento foi atualizado, mas houve erro ao salvar seus efeitos: ${effectError instanceof Error ? effectError.message : 'erro desconhecido'}`)
+      setSaving(false)
+      setReloadKey((current) => current + 1)
+      return
+    }
 
     const {
       error: deletePrerequisitesError,
@@ -2542,6 +2553,8 @@ export default function TalentTree({
                   Adicionar requisito por árvore
                 </button>
               </div>
+
+              <TalentEffectsEditor ref={effectsEditorRef} talentId={editingId} />
 
               {error && (
                 <div className="talent-feedback error" role="alert">

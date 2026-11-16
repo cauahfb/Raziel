@@ -10,6 +10,7 @@ import Dashboard from './pages/Dashboard/Dashboard'
 import Login from './pages/Login/Login'
 import SupremeTalents from './pages/SupremeTalents/SupremeTalents'
 import TalentTree from './pages/TalentTrees/TalentTree'
+import StatBlock from './pages/StatBlock'
 
 import TalentManagement from './pages/admin/TalentManagement'
 import ResetProgress from './pages/admin/ResetProgress'
@@ -598,6 +599,8 @@ function App() {
     ) {
       return renderAdminPage(page)
     }
+
+    if (page === 'summary') return <StatBlock />
 
     if (page === 'dashboard') {
       return (

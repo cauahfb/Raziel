@@ -18,7 +18,7 @@ export default function AppLayout({ activePage, trees, isAdmin, supremeAvailable
   const [mobileOpen, setMobileOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const selectedTree = trees.find((tree) => tree.id === activePage)
-  const breadcrumb = selectedTree?.name.toUpperCase() ?? (activePage === 'supremas' ? 'CONHECIMENTO RESTRITO' : activePage === 'history' || activePage === 'backup' ? 'ÁREA ADMINISTRATIVA' : 'VISÃO GERAL')
+  const breadcrumb = selectedTree?.name.toUpperCase() ?? (activePage === 'summary' ? 'RESUMO' : activePage === 'supremas' ? 'CONHECIMENTO RESTRITO' : activePage === 'history' || activePage === 'backup' ? 'ÁREA ADMINISTRATIVA' : 'VISÃO GERAL')
 
   function navigate(page: PageKey) {
     onNavigate(page)

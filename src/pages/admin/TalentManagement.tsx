@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { FormEvent } from 'react'
 
@@ -27,6 +27,7 @@ import {
 
 
 import { supabase } from '../../lib/supabase'
+import TalentEffectsEditor, { type TalentEffectsEditorHandle } from '../../components/TalentEffectsEditor'
 
 import { trees } from '../../data/trees'
 
@@ -267,6 +268,7 @@ export default function TalentManagement() {
 
 
   const [modalOpen, setModalOpen] = useState(false)
+  const effectsEditorRef = useRef<TalentEffectsEditorHandle>(null)
 
   const [editingId, setEditingId] = useState<string | null>(null)
 
@@ -1161,6 +1163,15 @@ export default function TalentManagement() {
 
 
     const talentId = result.data.id
+
+    try {
+      await effectsEditorRef.current?.save(talentId)
+    } catch (effectError) {
+      setError(`O talento foi salvo, mas houve erro ao salvar seus efeitos: ${effectError instanceof Error ? effectError.message : 'erro desconhecido'}`)
+      setSaving(false)
+      await loadTalents()
+      return
+    }
 
     if (isSupreme) {
       const { error: refreshError } = await supabase.rpc('refresh_automatic_compendium_unlocks')
@@ -2741,6 +2752,8 @@ export default function TalentManagement() {
               </div>
 
 
+
+              <TalentEffectsEditor ref={effectsEditorRef} talentId={editingId} />
 
               {error && (
 
