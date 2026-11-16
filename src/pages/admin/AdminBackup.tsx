@@ -29,6 +29,11 @@ type BackupPayload = {
   talent_progress: unknown[]
   talent_tree_apices?: unknown[]
   compendium_progress?: unknown[]
+  compendium_special_contents?: unknown[]
+  compendium_effect_owners?: unknown[]
+  compendium_effects?: unknown[]
+  compendium_effect_interactions?: unknown[]
+  compendium_talent_activities?: unknown[]
 }
 
 type RestoreDiagnostic = {
@@ -45,6 +50,11 @@ type BackupCounts = {
   talent_tree_requirements: number
   talent_progress: number
   talent_tree_apices: number
+  compendium_special_contents: number
+  compendium_effect_owners: number
+  compendium_effects: number
+  compendium_effect_interactions: number
+  compendium_talent_activities: number
   character_level: number | null
 }
 
@@ -52,6 +62,7 @@ type SnapshotPreview = BackupCounts & {
   id: string
   label: string | null
   created_at: string
+  version?: number
 }
 
 type PendingRestore =
@@ -66,6 +77,7 @@ type PendingRestore =
       kind: 'snapshot'
       title: string
       snapshotId: string
+      version: number
       incoming: BackupCounts
       current: BackupCounts
     }
@@ -122,9 +134,12 @@ function getPayloadCounts(payload: BackupPayload): BackupCounts {
     talent_prerequisites: payload.talent_prerequisites.length,
     talent_tree_requirements: payload.talent_tree_requirements.length,
     talent_progress: payload.talent_progress.length,
-    talent_tree_apices: Array.isArray(payload.talent_tree_apices)
-      ? payload.talent_tree_apices.length
-      : 0,
+    talent_tree_apices: Array.isArray(payload.talent_tree_apices) ? payload.talent_tree_apices.length : 0,
+    compendium_special_contents: Array.isArray(payload.compendium_special_contents) ? payload.compendium_special_contents.length : 0,
+    compendium_effect_owners: Array.isArray(payload.compendium_effect_owners) ? payload.compendium_effect_owners.length : 0,
+    compendium_effects: Array.isArray(payload.compendium_effects) ? payload.compendium_effects.length : 0,
+    compendium_effect_interactions: Array.isArray(payload.compendium_effect_interactions) ? payload.compendium_effect_interactions.length : 0,
+    compendium_talent_activities: Array.isArray(payload.compendium_talent_activities) ? payload.compendium_talent_activities.length : 0,
     character_level: typeof levelRows[0]?.character_level === 'number'
       ? levelRows[0].character_level as number
       : null,
@@ -147,6 +162,21 @@ function isValidSnapshotPreview(value: unknown): value is SnapshotPreview {
     typeof preview.talent_tree_apices === 'number' &&
     (preview.character_level === null || typeof preview.character_level === 'number')
   )
+}
+
+async function fetchAllRows(table: string, orderColumns: string[] = []) {
+  if (!supabase) throw new Error('Conexão com o Supabase indisponível.')
+  const pageSize = 1000
+  const rows: Record<string, unknown>[] = []
+  for (let offset = 0; ; offset += pageSize) {
+    let query = supabase.from(table).select('*')
+    for (const column of orderColumns) query = query.order(column, { ascending: true })
+    const { data, error } = await query.range(offset, offset + pageSize - 1)
+    if (error) throw error
+    rows.push(...((data ?? []) as Record<string, unknown>[]))
+    if (!data || data.length < pageSize) break
+  }
+  return rows
 }
 
 export default function AdminBackup() {
@@ -192,109 +222,76 @@ export default function AdminBackup() {
   }, [])
 
   async function getCurrentCounts(): Promise<BackupCounts> {
-    if (!supabase) {
-      throw new Error('Conexão com o Supabase indisponível.')
-    }
-
-    const [talents, prerequisites, treeRequirements, progress, apices, globalProgress] =
-      await Promise.all([
-        supabase.from('talents').select('*', { count: 'exact', head: true }),
-        supabase.from('talent_prerequisites').select('*', { count: 'exact', head: true }),
-        supabase.from('talent_tree_requirements').select('*', { count: 'exact', head: true }),
-        supabase.from('talent_progress').select('*', { count: 'exact', head: true }),
-        supabase.from('talent_tree_apices').select('*', { count: 'exact', head: true }),
-        supabase.from('compendium_progress').select('character_level').eq('id', 1).maybeSingle(),
-      ])
-
-    const failure = talents.error || prerequisites.error || treeRequirements.error ||
-      progress.error || apices.error || globalProgress.error
-
-    if (failure) throw failure
-
+    if (!supabase) throw new Error('Conexão com o Supabase indisponível.')
+    // Captura a instância após a guarda: o TypeScript não preserva o narrowing
+    // da variável global dentro do callback passado ao map().
+    const client = supabase
+    const tables = [
+      'talents', 'talent_prerequisites', 'talent_tree_requirements', 'talent_progress',
+      'talent_tree_apices', 'compendium_special_contents', 'compendium_effect_owners',
+      'compendium_effects', 'compendium_effect_interactions', 'compendium_talent_activities',
+    ] as const
+    const results = await Promise.all(tables.map((table) =>
+      client.from(table).select('*', { count: 'exact', head: true })
+    ))
+    const failed = results.find((result) => result.error)
+    if (failed?.error) throw failed.error
+    const globalProgress = await client.from('compendium_progress')
+      .select('character_level').eq('id', 1).maybeSingle()
+    if (globalProgress.error) throw globalProgress.error
+    const counts = results.map((result) => result.count ?? 0)
     return {
-      talents: talents.count ?? 0,
-      talent_prerequisites: prerequisites.count ?? 0,
-      talent_tree_requirements: treeRequirements.count ?? 0,
-      talent_progress: progress.count ?? 0,
-      talent_tree_apices: apices.count ?? 0,
-      character_level: globalProgress.data?.character_level ?? null,
+      talents: counts[0], talent_prerequisites: counts[1], talent_tree_requirements: counts[2],
+      talent_progress: counts[3], talent_tree_apices: counts[4],
+      compendium_special_contents: counts[5], compendium_effect_owners: counts[6],
+      compendium_effects: counts[7], compendium_effect_interactions: counts[8],
+      compendium_talent_activities: counts[9], character_level: globalProgress.data?.character_level ?? null,
     }
   }
 
   async function exportBackup() {
     if (!supabase) return
-
-    setBusy(true)
-    setError('')
-    setMessage('')
-    setRestoreDiagnostic(null)
-    setPendingRestore(null)
-
+    setBusy(true); setError(''); setMessage(''); setRestoreDiagnostic(null); setPendingRestore(null)
     try {
-      const [talents, prerequisites, treeRequirements, progress, apices, globalProgress] =
-        await Promise.all([
-          supabase
-            .from('talents')
-            .select('*')
-            .order('tree_key')
-            .order('sort_order'),
-          supabase.from('talent_prerequisites').select('*'),
-          supabase.from('talent_tree_requirements').select('*'),
-          supabase.from('talent_progress').select('*'),
-          supabase.from('talent_tree_apices').select('*').order('tree_key'),
-          supabase.from('compendium_progress').select('*').eq('id', 1),
-        ])
-
-      const failure =
-        talents.error ||
-        prerequisites.error ||
-        treeRequirements.error ||
-        progress.error ||
-        apices.error ||
-        globalProgress.error
-
-      if (failure) throw failure
+      const [talents, prerequisites, treeRequirements, progress, apices, globalProgress,
+        specialContents, effectOwners, effects, interactions, activities] = await Promise.all([
+        fetchAllRows('talents', ['tree_key', 'sort_order', 'id']),
+        fetchAllRows('talent_prerequisites', ['talent_id', 'prerequisite_talent_id']),
+        fetchAllRows('talent_tree_requirements', ['talent_id', 'required_tree_key']),
+        fetchAllRows('talent_progress', ['talent_id']),
+        fetchAllRows('talent_tree_apices', ['tree_key']),
+        fetchAllRows('compendium_progress', ['id']),
+        fetchAllRows('compendium_special_contents', ['sort_order', 'content_key']),
+        fetchAllRows('compendium_effect_owners', ['created_at', 'id']),
+        fetchAllRows('compendium_effects', ['sort_order', 'id']),
+        fetchAllRows('compendium_effect_interactions', ['created_at', 'id']),
+        fetchAllRows('compendium_talent_activities', ['sort_order', 'id']),
+      ])
 
       const payload: BackupPayload = {
-        format: 'raziel-compendium-backup',
-        version: 1,
-        created_at: new Date().toISOString(),
-        talents: talents.data ?? [],
-        talent_prerequisites: prerequisites.data ?? [],
-        talent_tree_requirements: treeRequirements.data ?? [],
-        talent_progress: progress.data ?? [],
-        talent_tree_apices: apices.data ?? [],
-        compendium_progress: globalProgress.data ?? [],
+        format: 'raziel-compendium-backup', version: 2, created_at: new Date().toISOString(),
+        talents: talents, talent_prerequisites: prerequisites,
+        talent_tree_requirements: treeRequirements, talent_progress: progress,
+        talent_tree_apices: apices, compendium_progress: globalProgress,
+        compendium_special_contents: specialContents, compendium_effect_owners: effectOwners,
+        compendium_effects: effects, compendium_effect_interactions: interactions,
+        compendium_talent_activities: activities,
       }
-
-      const blob = new Blob([JSON.stringify(payload, null, 2)], {
-        type: 'application/json',
-      })
-
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
-
       a.href = url
-      a.download = `raziel-backup-${new Date()
-        .toISOString()
-        .replace(/[:.]/g, '-')}.json`
-
+      a.download = `raziel-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.json`
       a.click()
-      URL.revokeObjectURL(url)
-
-      setMessage('Backup JSON gerado com sucesso.')
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+      setMessage('Backup completo v2 gerado com sucesso.')
     } catch (e) {
       const details = getErrorDetails(e)
-
-      setError(
-        `Falha ao gerar backup:\n${details.message}` +
-          (details.code ? `\nCódigo: ${details.code}` : '') +
-          (details.details ? `\nDetalhes: ${details.details}` : '') +
-          (details.hint ? `\nDica: ${details.hint}` : '')
-      )
-    } finally {
-      setBusy(false)
-    }
+      setError(`Falha ao gerar backup:\n${details.message}` +
+        (details.code ? `\nCódigo: ${details.code}` : '') +
+        (details.details ? `\nDetalhes: ${details.details}` : '') +
+        (details.hint ? `\nDica: ${details.hint}` : ''))
+    } finally { setBusy(false) }
   }
 
   async function restoreFile(file: File) {
@@ -343,10 +340,8 @@ export default function AdminBackup() {
         )
       }
 
-      if (payload.version !== 1) {
-        throw new Error(
-          `Versão incompatível: ${payload.version}. Esperada: 1.`
-        )
+      if (payload.version !== 1 && payload.version !== 2) {
+        throw new Error(`Versão incompatível: ${payload.version}. Esperadas: 1 ou 2.`)
       }
 
       const collections = [
@@ -375,6 +370,16 @@ export default function AdminBackup() {
         const global = payload.compendium_progress[0] as Record<string, unknown>
         if (global.id !== 1 || !Number.isInteger(global.character_level) || Number(global.character_level) < 1) {
           throw new Error('O nível global do backup é inválido.')
+        }
+      }
+
+      const v2Collections = [
+        'compendium_special_contents', 'compendium_effect_owners', 'compendium_effects',
+        'compendium_effect_interactions', 'compendium_talent_activities',
+      ] as const
+      if (payload.version === 2) {
+        for (const collection of v2Collections) {
+          if (!Array.isArray(payload[collection])) throw new Error(`A coleção "${collection}" é obrigatória em backups v2.`)
         }
       }
 
@@ -477,12 +482,18 @@ export default function AdminBackup() {
         kind: 'snapshot',
         title: snapshot.label || 'Snapshot da progressão',
         snapshotId: snapshot.id,
+        version: Number(data.version ?? 1),
         incoming: {
           talents: data.talents,
           talent_prerequisites: data.talent_prerequisites,
           talent_tree_requirements: data.talent_tree_requirements,
           talent_progress: data.talent_progress,
           talent_tree_apices: data.talent_tree_apices,
+          compendium_special_contents: Number(data.compendium_special_contents ?? 0),
+          compendium_effect_owners: Number(data.compendium_effect_owners ?? 0),
+          compendium_effects: Number(data.compendium_effects ?? 0),
+          compendium_effect_interactions: Number(data.compendium_effect_interactions ?? 0),
+          compendium_talent_activities: Number(data.compendium_talent_activities ?? 0),
           character_level: data.character_level,
         },
         current,
@@ -537,8 +548,8 @@ export default function AdminBackup() {
 
       setMessage(
         selectedRestore.kind === 'backup'
-          ? 'Backup restaurado com sucesso. A progressão global foi atualizada.'
-          : 'Snapshot restaurado com sucesso. A progressão global foi atualizada.'
+          ? 'Backup restaurado com sucesso. O compêndio e sua progressão foram atualizados.'
+          : 'Snapshot restaurado com sucesso. O compêndio e sua progressão foram atualizados.'
       )
 
       await loadSnapshots()
@@ -621,11 +632,12 @@ export default function AdminBackup() {
           current: pendingRestore.current.talent_progress,
           incoming: pendingRestore.incoming.talent_progress,
         },
-        {
-          name: 'Ápices das árvores',
-          current: pendingRestore.current.talent_tree_apices,
-          incoming: pendingRestore.incoming.talent_tree_apices,
-        },
+        { name: 'Ápices das árvores', current: pendingRestore.current.talent_tree_apices, incoming: pendingRestore.incoming.talent_tree_apices },
+        { name: 'Conteúdos especiais', current: pendingRestore.current.compendium_special_contents, incoming: pendingRestore.incoming.compendium_special_contents },
+        { name: 'Proprietários de efeitos', current: pendingRestore.current.compendium_effect_owners, incoming: pendingRestore.incoming.compendium_effect_owners },
+        { name: 'Efeitos', current: pendingRestore.current.compendium_effects, incoming: pendingRestore.incoming.compendium_effects },
+        { name: 'Interações entre efeitos', current: pendingRestore.current.compendium_effect_interactions, incoming: pendingRestore.incoming.compendium_effect_interactions },
+        { name: 'Atividades de talentos', current: pendingRestore.current.compendium_talent_activities, incoming: pendingRestore.incoming.compendium_talent_activities },
       ]
     : []
 
@@ -749,7 +761,7 @@ export default function AdminBackup() {
           <h2>Gerar backup</h2>
 
           <p>
-            Baixe um arquivo JSON completo com talentos, requisitos, progresso, Ápices e nível global.
+            Baixe um JSON v2 com talentos, progressão, Ápices, conteúdos especiais, efeitos, interações e atividades.
           </p>
 
           <button
@@ -966,8 +978,20 @@ export default function AdminBackup() {
             </h3>
 
             <p style={{ fontSize: '13px', opacity: 0.7 }}>
-              Os registros de talentos e progresso serão reconstruídos. Ápices e nível serão restaurados quando existirem no arquivo; backups antigos preservam os valores atuais dessas informações.
+              A restauração substitui os dados apresentados acima. Backups v1 não contêm efeitos, atividades ou conteúdos especiais; se esses dados já existirem no banco, o Supabase bloqueará a restauração antiga para impedir perda silenciosa.
             </p>
+
+            {(pendingRestore.kind === 'backup' ? pendingRestore.payload.version : pendingRestore.version) === 1 &&
+              (pendingRestore.current.compendium_special_contents +
+                pendingRestore.current.compendium_effect_owners +
+                pendingRestore.current.compendium_effects +
+                pendingRestore.current.compendium_effect_interactions +
+                pendingRestore.current.compendium_talent_activities) > 0 && (
+                <div role="alert" style={{ margin: '12px 0', padding: '13px', borderRadius: '8px', background: 'rgba(190, 125, 40, .12)', border: '1px solid rgba(190, 125, 40, .35)', color: 'var(--admin-text, #242424)' }}>
+                  <strong>Backup legado incompleto.</strong>
+                  <p style={{ margin: '5px 0 0', fontSize: '13px' }}>Este arquivo não contém as novas estruturas do compêndio. A restauração será recusada pelo banco enquanto existirem efeitos, atividades ou conteúdos especiais atuais. Gere um backup v2 antes de restaurar.</p>
+                </div>
+              )}
 
             <div style={{ display: 'grid', gap: '10px' }}>
               {confirmationRows.map((item) => (

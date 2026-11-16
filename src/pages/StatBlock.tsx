@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { RefreshCw, Shield, Heart, Eye, Footprints, Wind, Waves, Mountain, MoveUpRight, Sparkles, Download, Swords, Target, Flame, Cross, Zap, Link2, Wifi, WifiOff } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { RefreshCw, Shield, Heart, Eye, Footprints, Wind, Waves, Mountain, MoveUpRight, Sparkles, Download, ChevronDown, Swords, Target, Flame, Cross, Zap, Link2, Wifi, WifiOff } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 type EffectRow = {
@@ -116,6 +116,27 @@ function ActivityIcon({type}:{type:string}){
 type StatBlockProps = { isAdmin?: boolean }
 
 export default function StatBlock({isAdmin=false}:StatBlockProps){
+  const exportMenuRef=useRef<HTMLDetailsElement|null>(null)
+
+  useEffect(()=>{
+    function closeExportMenuOnOutsideClick(event:PointerEvent){
+      const menu=exportMenuRef.current
+      if(menu?.open && event.target instanceof Node && !menu.contains(event.target)){
+        menu.open=false
+      }
+    }
+    function closeExportMenuOnEscape(event:KeyboardEvent){
+      if(event.key==='Escape'&&exportMenuRef.current?.open){
+        exportMenuRef.current.open=false
+      }
+    }
+    document.addEventListener('pointerdown',closeExportMenuOnOutsideClick)
+    document.addEventListener('keydown',closeExportMenuOnEscape)
+    return ()=>{
+      document.removeEventListener('pointerdown',closeExportMenuOnOutsideClick)
+      document.removeEventListener('keydown',closeExportMenuOnEscape)
+    }
+  },[])
   const [effects,setEffects]=useState<EffectRow[]>([])
   const [activities,setActivities]=useState<ActivityRow[]>([])
   const [level,setLevel]=useState<number|null>(null)
@@ -128,6 +149,7 @@ export default function StatBlock({isAdmin=false}:StatBlockProps){
   const [pairingCode,setPairingCode]=useState('')
   const [syncMessage,setSyncMessage]=useState('')
   const [syncMessageType,setSyncMessageType]=useState<'info'|'success'|'error'>('info')
+  const [manualExportMessage,setManualExportMessage]=useState('')
 
   async function load(){
     if(!supabase){setError('A conexão com o Compêndio não está configurada.');setLoading(false);return}
@@ -230,6 +252,25 @@ export default function StatBlock({isAdmin=false}:StatBlockProps){
     }
   }
 
+  async function exportManualJson(){
+    setExporting(true)
+    setManualExportMessage('')
+    setError('')
+    try{
+      const payload=await buildFoundryPayload()
+      const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'})
+      const url=URL.createObjectURL(blob)
+      const anchor=document.createElement('a')
+      anchor.href=url
+      anchor.download=`raziel-resumo-${new Date().toISOString().replace(/[:.]/g,'-')}.json`
+      anchor.click()
+      window.setTimeout(()=>URL.revokeObjectURL(url),1000)
+      setManualExportMessage('Resumo exportado em JSON para importação manual no Foundry.')
+    }catch(err){
+      setError(err instanceof Error?err.message:'Não foi possível exportar o resumo.')
+    }finally{setExporting(false)}
+  }
+
   async function refreshFoundryStatus(){
     if(!supabase||!isAdmin)return
     const {data,error}=await supabase.functions.invoke('raziel-foundry-bridge',{body:{action:'status'}})
@@ -325,7 +366,17 @@ export default function StatBlock({isAdmin=false}:StatBlockProps){
       {isAdmin&&<button type="button" onClick={()=>void (foundryConnected?syncWithFoundry():startPairing())} disabled={exporting||(!foundryConnected&&(Boolean(foundryIntegration)||Boolean(pairingCode)))}>
         {foundryConnected?<Link2 size={16}/>:<WifiOff size={16}/>} {exporting?'Processando…':foundryConnected?'Sincronizar com Foundry':foundryIntegration?'Foundry desconectado':pairingCode?'Aguardando pareamento':'Conectar Foundry'}
       </button>}
-      <button type="button" className="statblock-save-button" onClick={saveAsPdf}><Download size={16}/> Salvar PDF</button>
+      <details ref={exportMenuRef} className="statblock-export-menu">
+        <summary><Download size={16}/> Exportar <ChevronDown size={15}/></summary>
+        <div className="statblock-export-menu-items">
+          <button type="button" onClick={()=>{exportMenuRef.current&&(exportMenuRef.current.open=false);void exportManualJson()}} disabled={exporting}>
+            <Download size={15}/> {exporting?'Exportando JSON…':'Exportar JSON'}
+          </button>
+          <button type="button" onClick={()=>{exportMenuRef.current&&(exportMenuRef.current.open=false);saveAsPdf()}}>
+            <Download size={15}/> Exportar PDF
+          </button>
+        </div>
+      </details>
     </div></header>
     {isAdmin&&<div className={`foundry-sync-status ${syncMessageType}`}>
       <span className="foundry-sync-indicator">{foundryConnected?<Wifi size={15}/>:<WifiOff size={15}/>}</span>
@@ -333,6 +384,7 @@ export default function StatBlock({isAdmin=false}:StatBlockProps){
       {pairingCode&&<><strong className="foundry-pairing-code">{pairingCode}</strong><button type="button" onClick={()=>{setPairingCode('');void startPairing()}} disabled={exporting}>Gerar outro código</button></>}
     </div>}
     {error&&<p className="statblock-error" role="alert">{error}</p>}
+    {manualExportMessage&&<p className="statblock-export-feedback" role="status">{manualExportMessage}</p>}
     <article className="statblock-sheet">
       <div className="statblock-title"><Sparkles size={22}/><div><span>REGISTRO DE CAPACIDADES</span><h2>Estatísticas e características</h2></div></div>
       <div className="statblock-primary">
