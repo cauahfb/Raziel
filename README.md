@@ -1,5 +1,7 @@
 # ✦ Raziel Compendium
-Parte do Projeto campanharpg.com.br
+Parte do Projeto CampanhaRPG
+[![Website](https://img.shields.io/badge/Website-campanharpg.com.br-67247f?style=for-the-badge)](https://campanharpg.com.br)
+
 **Um compêndio digital para explorar, organizar e acompanhar a progressão de talentos.**
 
 O **Raziel Compendium** é uma aplicação web desenvolvida para centralizar o conhecimento e a progressão de talentos de um sistema próprio, oferecendo uma experiência interativa para consultar habilidades, explorar árvores de talentos e acompanhar a evolução coletiva.
